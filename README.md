@@ -29,14 +29,31 @@
 
 ## Environment Variables
 
-Copy `.env.template` to `.env` and fill in the required values:
+Create a `.env` file in the project root with the following variables:
 
 - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
-- `GOOGLE_SHEETS_CREDENTIALS_JSON`: Google service account credentials (JSON string or path)
+- `BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS`: Google service account credentials, base64-encoded JSON string (see below)
 - `GOOGLE_SHEETS_SPREADSHEET_ID`: The ID of your Google Sheets document
+- `OPENAI_API_KEY`: Your OpenAI API key (for GPT-4 Vision)
+- `LOG_LEVEL`: (optional) Log level for pino logger (default: info)
+
+### How to encode Google Sheets credentials
+
+1. Download your Google service account JSON file
+2. Run: `base64 <your-credentials.json>`
+3. Copy the output and set it as the value for `BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS`
 
 ## Next Steps
 
 - Set up CI (GitHub Actions)
 - Scaffold Telegram bot
 - Integrate Google Sheets and LLM OCR
+
+## Deployment (Railway)
+
+This bot is designed to run as a persistent process (not serverless). Railway is recommended for easy Node.js bot deployment.
+
+1. [Create a Railway account](https://railway.app/)
+2. Link your GitHub repo or deploy manually
+3. Set environment variables in the Railway dashboard (see .env.template)
+4. Deploy! Railway will use the Procfile and start the bot with `yarn start`.

@@ -3,14 +3,12 @@ import TelegramBot from 'node-telegram-bot-api';
 import { writeExpenseRow } from './googleSheets';
 import { extractReceiptDataFromImage } from './llmReceiptExtractor';
 import logger from './logger';
-// import fetch from 'node-fetch'; // Use native fetch
 
 const USERNAME_TO_PAYER: Record<string, string> = {
   alejoamiras: 'alejo',
   // Add your girlfriend's username here when available
 };
 
-// TODO: Replace with your actual Telegram bot token
 const token = process.env.TELEGRAM_BOT_TOKEN || '';
 
 if (!token) {
