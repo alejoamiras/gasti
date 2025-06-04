@@ -5,13 +5,14 @@
       "name": "setup",
       "image": "node:18",
       "commands": [
-        "npm install -g yarn"
+        "npm install -g yarn",
+        "export NODE_OPTIONS='--max-old-space-size=384'"
       ]
     },
     {
       "name": "install",
       "commands": [
-        "yarn install"
+        "yarn install --production --frozen-lockfile"
       ]
     }
   ],
