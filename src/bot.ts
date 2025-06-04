@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
-import { writeExpenseRow } from './googleSheets';
-import { extractReceiptDataFromImage } from './llmReceiptExtractor';
-import logger from './logger';
+import { writeExpenseRow } from '../library/sheets';
+import { extractReceiptDataFromImage } from '../library/llm';
+import logger from '../library/logger';
 
 const USERNAME_TO_PAYER: Record<string, string> = {
   alejoamiras: 'alejo',
