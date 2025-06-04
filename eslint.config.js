@@ -34,8 +34,10 @@ module.exports = [
         'error',
         'ignorePackages',
         {
-          ts: 'never',
           js: 'never',
+          ts: 'never',
+          jsx: 'never',
+          tsx: 'never',
         },
       ],
       'import/no-unresolved': 'off',
@@ -43,6 +45,14 @@ module.exports = [
     },
     linterOptions: {
       reportUnusedDisableDirectives: true,
+    },
+    settings: {
+      'import/resolver': {
+        node: {
+          extensions: ['.js', '.ts'],
+          moduleDirectory: ['node_modules', 'src', 'library'],
+        },
+      },
     },
   },
 ];

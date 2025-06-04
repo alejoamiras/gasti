@@ -1,7 +1,9 @@
-// import fetch from 'node-fetch';
 import logger from './logger';
 
-export async function extractReceiptDataFromImage(base64Image: string, mimeType: string): Promise<any> {
+export async function extractReceiptDataFromImage(
+  base64Image: string,
+  mimeType: string,
+): Promise<Record<string, unknown>> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set in environment variables.');
@@ -18,15 +20,16 @@ export async function extractReceiptDataFromImage(base64Image: string, mimeType:
       {
         role: 'user',
         content: [
-          { type: 'text', text: `
-Extract the following fields from this receipt image:
+          {
+            type: 'text',
+            text: `Extract the following fields from this receipt image:
 - description (in Spanish, neutral or Argentinian)
 - amount
 - category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure))
 - comments (in Spanish, neutral or Argentinian)
 
-Output the result as a JSON object with these keys.
-          `.trim() },
+Output the result as a JSON object with these keys.`.trim(),
+          },
           {
             type: 'image_url',
             image_url: {
@@ -49,20 +52,33 @@ Output the result as a JSON object with these keys.
     body: JSON.stringify(payload),
   });
 
-  const data = (await response.json()) as any;
-  if (!data.choices || !data.choices[0]?.message?.content) {
+  const data = (await response.json()) as unknown;
+  if (
+    typeof data !== 'object' ||
+    data === null ||
+    !('choices' in data) ||
+    !Array.isArray((data as any).choices) ||
+    !(data as any).choices[0]?.message?.content
+  ) {
     logger.error({ data }, 'No response from OpenAI Vision API');
     throw new Error('No response from OpenAI Vision API');
   }
 
   // Try to parse the JSON from the response
   try {
-    const jsonStart = data.choices[0].message.content.indexOf('{');
-    const jsonEnd = data.choices[0].message.content.lastIndexOf('}') + 1;
-    const jsonString = data.choices[0].message.content.slice(jsonStart, jsonEnd);
+    const content = (data as any).choices[0].message.content;
+    const jsonStart = content.indexOf('{');
+    const jsonEnd = content.lastIndexOf('}') + 1;
+    const jsonString = content.slice(jsonStart, jsonEnd);
     return JSON.parse(jsonString);
   } catch (err) {
-    logger.error({ err, content: data.choices[0].message.content }, 'Failed to parse JSON from LLM response');
-    throw new Error('Failed to parse JSON from LLM response: ' + data.choices[0].message.content);
+    logger.error(
+      { err, content: (data as any).choices[0].message.content },
+      'Failed to parse JSON from LLM response',
+    );
+    throw new Error(
+      'Failed to parse JSON from LLM response: ' +
+        (data as any).choices[0].message.content,
+    );
   }
 } 

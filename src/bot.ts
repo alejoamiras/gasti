@@ -25,10 +25,7 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
   const payer = USERNAME_TO_PAYER[username] || username;
 
   logger.info({ username, chatId }, 'Received a receipt photo');
-  bot.sendMessage(
-    chatId,
-    `Received a receipt from ${username}. Processing with AI...`,
-  );
+  bot.sendMessage(chatId, `Received a receipt from ${username}. Processing with AI...`);
 
   try {
     // Get the highest resolution photo
@@ -54,7 +51,7 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
       payer,
       llmResult.category || '🤔',
       llmResult.comments || '',
-    ];
+    ] as string[];
     await writeExpenseRow(row);
     logger.info({ username, row }, 'Expense added to Google Sheets');
     bot.sendMessage(chatId, '✅ Expense added to Google Sheets!');
