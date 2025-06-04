@@ -1,0 +1,23 @@
+{
+  "$schema": "https://schema.railpack.com",
+  "steps": [
+    {
+      "name": "setup",
+      "image": "node:18",
+      "commands": [
+        "npm install -g yarn"
+      ]
+    },
+    {
+      "name": "install",
+      "commands": [
+        "yarn install"
+      ]
+    }
+  ],
+  "deploy": {
+    "base": "node:18",
+    "startCommand": "yarn start",
+    "inputs": ["setup", "install"]
+  }
+} 

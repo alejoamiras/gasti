@@ -10,7 +10,6 @@ build/
 .env.local
 .env.development
 .env.production
-# .env.template is NOT ignored
 
 # Logs
 *.log
@@ -39,19 +38,12 @@ jspm_packages/
 
 # Yarn
 .yarn/
-yarn.lock
 
 # Misc
 *.tgz
 
 # Local files
 *.local
-
-# Google credentials
-*.json
-
-# GitHub workflows cache
-.github/
 
 # Ignore scratchpad and other cursor files
 .cursor/
