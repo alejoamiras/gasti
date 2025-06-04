@@ -6,6 +6,7 @@ import { extractReceiptDataFromImage } from './llmReceiptExtractor';
 async function main() {
   // Path to a sample image (replace with your own test image path)
   const imagePath = path.resolve(__dirname, '../test-receipt.jpg');
+  // Test log: for local dev only
   console.log('Using image:', imagePath);
   const mimeType = 'image/jpeg';
   const imageBuffer = fs.readFileSync(imagePath);
@@ -13,8 +14,10 @@ async function main() {
 
   try {
     const result = await extractReceiptDataFromImage(base64Image, mimeType);
+    // Test log: for local dev only
     console.log('✅ LLM extracted receipt data:', result);
   } catch (err) {
+    // Test log: for local dev only
     console.error('❌ LLM extraction failed:', err);
   }
 }

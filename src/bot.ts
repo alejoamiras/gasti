@@ -2,6 +2,7 @@ import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
 import { writeExpenseRow } from './googleSheets';
 import { extractReceiptDataFromImage } from './llmReceiptExtractor';
+import logger from './logger';
 // import fetch from 'node-fetch'; // Use native fetch
 
 const USERNAME_TO_PAYER: Record<string, string> = {
@@ -18,11 +19,14 @@ if (!token) {
 
 const bot = new TelegramBot(token, { polling: true });
 
+logger.info('Telegram bot started.');
+
 bot.on('photo', async (msg: TelegramBot.Message) => {
   const chatId = msg.chat.id;
   const username = msg.from?.username || msg.from?.first_name || 'Unknown';
   const payer = USERNAME_TO_PAYER[username] || username;
 
+  logger.info({ username, chatId }, 'Received a receipt photo');
   bot.sendMessage(
     chatId,
     `Received a receipt from ${username}. Processing with AI...`,
@@ -41,6 +45,7 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
 
     // Extract receipt data using LLM
     const llmResult = await extractReceiptDataFromImage(base64Image, mimeType);
+    logger.debug({ llmResult }, 'LLM extracted receipt data');
 
     // Compose row for Google Sheets
     const row = [
@@ -53,10 +58,10 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
       llmResult.comments || '',
     ];
     await writeExpenseRow(row);
+    logger.info({ username, row }, 'Expense added to Google Sheets');
     bot.sendMessage(chatId, '✅ Expense added to Google Sheets!');
   } catch (err) {
+    logger.error({ err }, 'Failed to process receipt');
     bot.sendMessage(chatId, `❌ Failed to process receipt: ${err}`);
   }
 });
-
-console.log('Telegram bot started.');

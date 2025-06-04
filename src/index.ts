@@ -1,1 +1,1 @@
-console.log('Hello, Gastis!');
+// (file intentionally left blank for now)

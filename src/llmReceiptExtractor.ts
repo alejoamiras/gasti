@@ -1,4 +1,5 @@
 // import fetch from 'node-fetch';
+import logger from './logger';
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
 
@@ -51,8 +52,8 @@ Output the result as a JSON object with these keys.
   });
 
   const data = (await response.json()) as any;
-  console.log('OpenAI API raw response:', JSON.stringify(data, null, 2));
   if (!data.choices || !data.choices[0]?.message?.content) {
+    logger.error({ data }, 'No response from OpenAI Vision API');
     throw new Error('No response from OpenAI Vision API');
   }
 
@@ -63,6 +64,7 @@ Output the result as a JSON object with these keys.
     const jsonString = data.choices[0].message.content.slice(jsonStart, jsonEnd);
     return JSON.parse(jsonString);
   } catch (err) {
+    logger.error({ err, content: data.choices[0].message.content }, 'Failed to parse JSON from LLM response');
     throw new Error('Failed to parse JSON from LLM response: ' + data.choices[0].message.content);
   }
 } 
