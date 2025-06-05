@@ -32,10 +32,10 @@ export async function extractReceiptDataFromImage(
           {
             type: 'text',
             text: `Extract the following fields from this receipt image:
-- description (in Spanish, neutral or Argentinian)
+- title (first try to infer from the additional context on the message (they are in argentinian spanish). If not, name of the company or store if it can be identified. otherwise, something generic like "Supermercado" or "Tienda de ropa". in Spanish, neutral or Argentinian)
 - amount
 - category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure))
-- comments (in Spanish, neutral or Argentinian)
+- description (in Spanish, neutral or Argentinian)
 
 Additional context from the message sent by the user. This should help you understand the receipt better: ${messageText}
 

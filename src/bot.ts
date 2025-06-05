@@ -46,13 +46,13 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
 
     // Compose row for Google Sheets
     const row = [
-      llmResult.description || '',
+      llmResult.title || '',
       'ARS', // Moneda (always ARS)
       llmResult.amount || '',
       llmResult.amount || '', // ARS (repeat for test)
       payer,
       llmResult.category || '🤔',
-      llmResult.comments || '',
+      llmResult.description || '',
     ] as string[];
     await writeExpenseRow(row);
     logger.info({ username, row }, 'Expense added to Google Sheets');
@@ -98,13 +98,13 @@ bot.on('document', async (msg: TelegramBot.Message) => {
 
     // Compose row for Google Sheets
     const row = [
-      llmResult.description || '',
+      llmResult.title || '',
       'ARS', // Moneda (always ARS)
       llmResult.amount || '',
       llmResult.amount || '', // ARS (repeat for test)
       payer,
       llmResult.category || '🤔',
-      llmResult.comments || '',
+      llmResult.description || '',
     ] as string[];
     await writeExpenseRow(row);
     logger.info({ username, row }, 'Expense added to Google Sheets');
