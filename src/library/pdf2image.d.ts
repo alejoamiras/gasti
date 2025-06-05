@@ -6,7 +6,7 @@ declare module 'pdf2image' {
         density?: number;
         format?: 'jpeg' | 'png';
         quality?: number;
-      }
+      },
     ): Promise<Buffer[]>;
   }
-} 
+}

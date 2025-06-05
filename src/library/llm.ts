@@ -1,8 +1,17 @@
 import logger from './logger.js';
 
+interface OpenAIResponse {
+  choices: Array<{
+    message: {
+      content: string;
+    };
+  }>;
+}
+
 export async function extractReceiptDataFromImage(
   base64Image: string,
   mimeType: string,
+  messageText: string,
 ): Promise<Record<string, unknown>> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
   if (!OPENAI_API_KEY) {
@@ -27,6 +36,8 @@ export async function extractReceiptDataFromImage(
 - amount
 - category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure))
 - comments (in Spanish, neutral or Argentinian)
+
+Additional context from the message sent by the user. This should help you understand the receipt better: ${messageText}
 
 Output the result as a JSON object with these keys.`.trim(),
           },
@@ -57,8 +68,8 @@ Output the result as a JSON object with these keys.`.trim(),
     typeof data !== 'object' ||
     data === null ||
     !('choices' in data) ||
-    !Array.isArray((data as any).choices) ||
-    !(data as any).choices[0]?.message?.content
+    !Array.isArray((data as OpenAIResponse).choices) ||
+    !(data as OpenAIResponse).choices[0]?.message?.content
   ) {
     logger.error({ data }, 'No response from OpenAI Vision API');
     throw new Error('No response from OpenAI Vision API');
@@ -66,19 +77,19 @@ Output the result as a JSON object with these keys.`.trim(),
 
   // Try to parse the JSON from the response
   try {
-    const content = (data as any).choices[0].message.content;
+    const content = (data as OpenAIResponse).choices[0].message.content;
     const jsonStart = content.indexOf('{');
     const jsonEnd = content.lastIndexOf('}') + 1;
     const jsonString = content.slice(jsonStart, jsonEnd);
     return JSON.parse(jsonString);
   } catch (err) {
     logger.error(
-      { err, content: (data as any).choices[0].message.content },
+      { err, content: (data as OpenAIResponse).choices[0].message.content },
       'Failed to parse JSON from LLM response',
     );
     throw new Error(
       'Failed to parse JSON from LLM response: ' +
-        (data as any).choices[0].message.content,
+        (data as OpenAIResponse).choices[0].message.content,
     );
   }
-} 
+}

@@ -15,4 +15,4 @@ describe('extractReceiptDataFromImage', () => {
     expect(result).toHaveProperty('category');
     expect(result).toHaveProperty('comments');
   });
-}); 
+});

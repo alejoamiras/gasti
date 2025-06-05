@@ -4,15 +4,11 @@
     {
       "name": "setup",
       "image": "node:18-alpine",
-      "commands": [
-        "npm install -g yarn ts-node typescript"
-      ]
+      "commands": ["npm install -g yarn ts-node typescript"]
     },
     {
       "name": "install",
-      "commands": [
-        "yarn install --production --frozen-lockfile"
-      ]
+      "commands": ["yarn install --production --frozen-lockfile"]
     }
   ],
   "deploy": {
@@ -20,4 +16,4 @@
     "startCommand": "yarn start",
     "inputs": ["setup", "install"]
   }
-} 
+}
