@@ -2,9 +2,12 @@
 export default {
   testEnvironment: 'node',
   transform: {
-    '^.+\\.tsx?$': ['ts-jest', {
-      useESM: true,
-    }],
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+      },
+    ],
   },
   roots: ['<rootDir>/src'],
   extensionsToTreatAsEsm: ['.ts'],
