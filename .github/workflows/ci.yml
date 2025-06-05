@@ -23,3 +23,5 @@ jobs:
         run: yarn build
       - name: Test
         run: yarn test
+      - name: Validate Commit Messages
+        run: npx --no -- commitlint --from=HEAD~1
