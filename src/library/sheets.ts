@@ -1,5 +1,5 @@
 import { google, sheets_v4 } from 'googleapis';
-import logger from './logger';
+import logger from './logger.js';
 
 const credentialsJson = Buffer.from(process.env.BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS as string, 'base64').toString('utf-8');
 const spreadsheetId = process.env.GOOGLE_SHEETS_SPREADSHEET_ID;
