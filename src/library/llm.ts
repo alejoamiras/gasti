@@ -7,12 +7,19 @@ interface OpenAIResponse {
     };
   }>;
 }
+interface LLMResult {
+  title: string;
+  amount: number;
+  category: string;
+  description: string;
+  summary: string;
+}
 
 export async function extractReceiptDataFromImage(
   base64Image: string,
   mimeType: string,
   messageText: string,
-): Promise<Record<string, unknown>> {
+): Promise<LLMResult> {
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set in environment variables.');
@@ -34,10 +41,11 @@ export async function extractReceiptDataFromImage(
             text: `Extract the following fields from this receipt image:
 - title (first try to infer from the additional context on the message (they are in argentinian spanish). If not, name of the company or store if it can be identified. otherwise, something generic like "Supermercado" or "Tienda de ropa". in Spanish, neutral or Argentinian)
 - amount
-- category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure))
+- category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure)). only use this emojis a answers.
 - description (in Spanish, neutral or Argentinian)
+- summary (a short summary of the receipt in Spanish, neutral or Argentinian). it should be a single sentence and also inform that the expense was added."
 
-Additional context from the message sent by the user. This should help you understand the receipt better: ${messageText}
+Additional context from the message sent by the user in Argentinian Spanish. This should help you understand the receipt better: ${messageText}
 
 Output the result as a JSON object with these keys.`.trim(),
           },

@@ -27,12 +27,12 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
   const messageText = msg.caption || ''; // Extract the caption text
 
   logger.info({ username, chatId, messageText }, 'Received a receipt photo');
-  bot.sendMessage(chatId, `Received a receipt from ${username}. Processing with AI...`);
+  bot.sendMessage(chatId, `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`);
 
   try {
     // Get the highest resolution photo
     const photo = msg.photo?.[msg.photo.length - 1];
-    if (!photo) throw new Error('No photo found in message.');
+    if (!photo) throw new Error('💁🏽 No se encontró ninguna foto en los mensajes');
     const file = await bot.getFile(photo.file_id);
     const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
     const response = await fetch(fileUrl);
@@ -56,7 +56,7 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
     ] as string[];
     await writeExpenseRow(row);
     logger.info({ username, row }, 'Expense added to Google Sheets');
-    bot.sendMessage(chatId, '✅ Expense added to Google Sheets!');
+    bot.sendMessage(chatId, llmResult.summary);
   } catch (err) {
     logger.error({ err }, 'Failed to process receipt');
     bot.sendMessage(chatId, `❌ Failed to process receipt: ${err}`);
@@ -76,7 +76,7 @@ bot.on('document', async (msg: TelegramBot.Message) => {
   }
 
   logger.info({ username, chatId, messageText }, 'Received a PDF receipt');
-  bot.sendMessage(chatId, `Received a PDF receipt from ${username}. Processing with AI...`);
+  bot.sendMessage(chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
 
   try {
     // Get the PDF file
@@ -108,7 +108,7 @@ bot.on('document', async (msg: TelegramBot.Message) => {
     ] as string[];
     await writeExpenseRow(row);
     logger.info({ username, row }, 'Expense added to Google Sheets');
-    bot.sendMessage(chatId, `✅ Processed PDF and added to Google Sheets!`);
+    bot.sendMessage(chatId, llmResult.summary);
   } catch (err) {
     logger.error({ err }, 'Failed to process PDF receipt');
     bot.sendMessage(chatId, `❌ Failed to process PDF receipt: ${err}`);
