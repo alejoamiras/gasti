@@ -8,8 +8,9 @@ describe('extractReceiptDataFromImage', () => {
     const mimeType = 'image/jpeg';
     const imageBuffer = fs.readFileSync(imagePath);
     const base64Image = imageBuffer.toString('base64');
+    const messageText = 'Compra de ropa en la tienda de ropa';
 
-    const result = await extractReceiptDataFromImage(base64Image, mimeType);
+    const result = await extractReceiptDataFromImage(base64Image, mimeType, messageText);
     expect(result).toHaveProperty('description');
     expect(result).toHaveProperty('amount');
     expect(result).toHaveProperty('category');
