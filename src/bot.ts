@@ -7,7 +7,7 @@ import { convertPdfToImages } from './library/pdf.js';
 
 const USERNAME_TO_PAYER: Record<string, string> = {
   alejoamiras: 'alejo',
-  // Add your girlfriend's username here when available
+  morafreaza: 'mora',
 };
 
 const token = process.env.TELEGRAM_BOT_TOKEN || '';
