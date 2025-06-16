@@ -14,6 +14,7 @@
   "deploy": {
     "base": "node:18-alpine",
     "startCommand": "yarn start",
-    "inputs": ["setup", "install"]
+    "inputs": ["setup", "install"],
+    "restartPolicy": "always"
   }
 }
