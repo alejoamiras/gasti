@@ -38,16 +38,69 @@ export async function extractReceiptDataFromImage(
         content: [
           {
             type: 'text',
-            text: `Extract the following fields from this receipt image:
-- title (first try to infer from the additional context on the message (they are in argentinian spanish). If not, name of the company or store if it can be identified. otherwise, something generic like "Supermercado" or "Tienda de ropa". in Spanish, neutral or Argentinian)
+            text: `📸 Receipt Extraction Prompt
+🎯 Mission
+You are a helpful assistant designed to extract structured data from photos of receipts. You must also consider the additional context provided by the user in text, which may help clarify the receipt.
+
+🌍 Context
+Users are from Argentina. Receipts are in Spanish (neutral or Argentinian). You may encounter local slang such as:
+- "Super" = supermercado (grocery store)
+- "Chino" = supermercado chino (Chinese-owned grocery store)
+- "Verdu" = verdulería (produce store)
+
+🧾 Instructions
+From the receipt image, extract the following fields as a JSON object:
+- title
 - amount
-- category (choose one of: 🏡 (home), 🛒 (groceries), 🍾 (dates), 🐱 (pet), 🖼️ (furniture/art), 🛫 (travel), 🤔 (uncategorized, if unsure)). only use this emojis a answers.
-- description (in Spanish, neutral or Argentinian)
-- summary (a short summary of the receipt in Spanish, neutral or Argentinian). it should be a single sentence and also inform that the expense was added."
+- category
+- description
+- summary
 
-Additional context from the message sent by the user in Argentinian Spanish. This should help you understand the receipt better: ${messageText}
+📌 Field Guidelines:
+- title:
+If the user-provided text gives a clear title, use it. Otherwise, infer it from the receipt image.
+If the store or company name is identifiable, use it (e.g. "Carrefour", "Freddo").
+If not, assign a generic label like: "Supermercado", "Restaurante", "Café", "Tienda de ropa", "Cine", "Hotel", "Educación", "Salud", "Ocio", "Transporte", "Otros".
 
-Output the result as a JSON object with these keys.`.trim(),
+- amount:
+Total amount paid. Use the final total in Argentine pesos (ARS), ignoring discounts, loyalty points, etc.
+
+- category:
+Choose only one of the following emojis:
+
+🏡 (home)
+🛒 (groceries)
+🍾 (dates)
+🐱 (pet)
+🖼️ (furniture/art)
+🛫 (travel)
+🤔 (uncategorized, if unsure)
+
+- description:
+A brief, human-readable summary of the items or services purchased. Use Spanish (neutral or Argentinian).
+
+- summary:
+One short sentence in Spanish summarizing the purchase. Include the fact that the expense was added.
+Example: "Compra en supermercado chino agregada como gasto."
+
+🧠 Additional Context
+Use this text provided by the user to help interpret the receipt:
+${messageText}
+
+⚠️ Notes
+Ignore irrelevant information such as QR codes, app promotions, or non-purchase data.
+
+If any field is missing or unclear, do your best to infer or leave it empty with null.
+
+🧾 Example Output
+{
+  "title": "Supermercado Chino",
+  "amount": 8432.50,
+  "category": "🛒",
+  "description": "Compra de alimentos y productos de limpieza",
+  "summary": "Gasto en supermercado chino agregado."
+}
+`.trim(),
           },
           {
             type: 'image_url',
