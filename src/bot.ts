@@ -33,19 +33,24 @@ const gracefulShutdown = async (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`);
 
   try {
-    // Stop polling to prevent new messages
+    // Stop polling to prevent new messages - be more aggressive
     logger.info('Stopping Telegram polling...');
-    await bot.stopPolling();
+    await bot.stopPolling({ cancel: true, reason: 'Graceful shutdown' });
     logger.info('Telegram polling stopped successfully');
 
-    // Give a moment for any ongoing operations to complete
-    await new Promise((resolve) => setTimeout(resolve, 2000));
+    // Give more time for any ongoing operations to complete and polling to fully stop
+    logger.info('Waiting for operations to complete...');
+    await new Promise((resolve) => setTimeout(resolve, 8000));
 
     logger.info('Graceful shutdown completed');
     process.exit(0);
   } catch (error) {
     logger.error('Error during graceful shutdown:', error);
-    process.exit(1);
+    // Force exit even if there's an error to avoid hanging
+    setTimeout(() => {
+      logger.error('Force exiting due to shutdown timeout');
+      process.exit(1);
+    }, 2000);
   }
 };
 
