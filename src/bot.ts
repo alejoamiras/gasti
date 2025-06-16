@@ -20,7 +20,57 @@ const bot = new TelegramBot(token, { polling: true });
 
 logger.info('Telegram bot started.');
 
+// Graceful shutdown handling
+let isShuttingDown = false;
+
+const gracefulShutdown = async (signal: string) => {
+  if (isShuttingDown) {
+    logger.warn('Shutdown already in progress, ignoring signal:', signal);
+    return;
+  }
+
+  isShuttingDown = true;
+  logger.info(`Received ${signal}. Starting graceful shutdown...`);
+
+  try {
+    // Stop polling to prevent new messages
+    logger.info('Stopping Telegram polling...');
+    await bot.stopPolling();
+    logger.info('Telegram polling stopped successfully');
+
+    // Give a moment for any ongoing operations to complete
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+
+    logger.info('Graceful shutdown completed');
+    process.exit(0);
+  } catch (error) {
+    logger.error('Error during graceful shutdown:', error);
+    process.exit(1);
+  }
+};
+
+// Handle shutdown signals
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// Handle uncaught exceptions and unhandled rejections
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception:', error);
+  gracefulShutdown('uncaughtException');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  gracefulShutdown('unhandledRejection');
+});
+
 bot.on('photo', async (msg: TelegramBot.Message) => {
+  // Prevent processing during shutdown
+  if (isShuttingDown) {
+    logger.warn('Ignoring message during shutdown');
+    return;
+  }
+
   const chatId = msg.chat.id;
   const username = msg.from?.username || msg.from?.first_name || 'Unknown';
   const payer = USERNAME_TO_PAYER[username] || username;
@@ -64,6 +114,12 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
 });
 
 bot.on('document', async (msg: TelegramBot.Message) => {
+  // Prevent processing during shutdown
+  if (isShuttingDown) {
+    logger.warn('Ignoring message during shutdown');
+    return;
+  }
+
   const chatId = msg.chat.id;
   const username = msg.from?.username || msg.from?.first_name || 'Unknown';
   const payer = USERNAME_TO_PAYER[username] || username;
