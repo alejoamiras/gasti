@@ -80,8 +80,8 @@ Choose only one of the following emojis:
 A brief, human-readable summary of the items or services purchased. Use Spanish (neutral or Argentinian).
 
 - summary:
-One short sentence in Spanish summarizing the purchase. Include the fact that the expense was added.
-Example: "Compra en supermercado chino agregada como gasto."
+One short sentence in Spanish summarizing the purchase. Include the fact that the expense was added, the amount, name and maybe category.
+Example: "Compra de $35.200 en supermercado chino agregada como gasto.", "Compra en Carrefour agregada como gasto.", "Compra de $10.000 en cita agregada como gasto."
 
 🧠 Additional Context
 Use this text provided by the user to help interpret the receipt:
@@ -98,7 +98,7 @@ If any field is missing or unclear, do your best to infer or leave it empty with
   "amount": 8432.50,
   "category": "🛒",
   "description": "Compra de alimentos y productos de limpieza",
-  "summary": "Gasto en supermercado chino agregado."
+  "summary": "Gasto de $15.300 en supermercado chino agregado."
 }
 `.trim(),
           },
