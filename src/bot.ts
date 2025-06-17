@@ -145,7 +145,12 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
     const base64Image = buffer.toString('base64');
 
     // Extract receipt data using LLM
-    const llmResult = await extractReceiptDataFromImage(base64Image, mimeType, messageText);
+    const llmResult = await extractReceiptDataFromImage(
+      base64Image,
+      mimeType,
+      messageText,
+      instanceLogger,
+    );
     instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data');
 
     // Compose row for Google Sheets
@@ -158,7 +163,7 @@ bot.on('photo', async (msg: TelegramBot.Message) => {
       llmResult.category || '🤔',
       llmResult.description || '',
     ] as string[];
-    await writeExpenseRow(row);
+    await writeExpenseRow(row, instanceLogger);
     instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
     bot.sendMessage(chatId, llmResult.summary);
   } catch (err) {
@@ -197,13 +202,18 @@ bot.on('document', async (msg: TelegramBot.Message) => {
     const buffer = Buffer.from(arrayBuffer);
     instanceLogger.debug('📦 Buffer received');
     // Convert PDF to images
-    const image = await convertPdfToImages(buffer);
+    const image = await convertPdfToImages(buffer, instanceLogger);
     instanceLogger.debug('🖼️ Converted PDF to image');
 
     // Process only the first page (one-page PDF assumption)
     const { base64Image, mimeType } = image;
     // Extract receipt data using LLM
-    const llmResult = await extractReceiptDataFromImage(base64Image, mimeType, messageText);
+    const llmResult = await extractReceiptDataFromImage(
+      base64Image,
+      mimeType,
+      messageText,
+      instanceLogger,
+    );
     instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data from PDF');
 
     // Compose row for Google Sheets
@@ -216,7 +226,7 @@ bot.on('document', async (msg: TelegramBot.Message) => {
       llmResult.category || '🤔',
       llmResult.description || '',
     ] as string[];
-    await writeExpenseRow(row);
+    await writeExpenseRow(row, instanceLogger);
     instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
     bot.sendMessage(chatId, llmResult.summary);
   } catch (err) {

@@ -1,11 +1,23 @@
 import logger from './logger.js';
 
+// Logger interface to support instance tracking
+interface Logger {
+  info: (msg: any, ...args: any[]) => void;
+  error: (msg: any, ...args: any[]) => void;
+  warn: (msg: any, ...args: any[]) => void;
+  debug: (msg: any, ...args: any[]) => void;
+}
+
 export interface ConvertedImage {
   base64Image: string;
   mimeType: string;
 }
 
-export async function convertPdfToImages(pdfBuffer: Buffer): Promise<ConvertedImage> {
+export async function convertPdfToImages(
+  pdfBuffer: Buffer,
+  instanceLogger?: Logger,
+): Promise<ConvertedImage> {
+  const log = instanceLogger || logger; // Use instanceLogger if provided, fallback to default
   try {
     // Dynamically import pdf-to-img
     const { pdf } = await import('pdf-to-img');
@@ -16,13 +28,13 @@ export async function convertPdfToImages(pdfBuffer: Buffer): Promise<ConvertedIm
     if (!(imageBuffer instanceof Buffer)) {
       throw new Error('Failed to convert PDF to image: Invalid image buffer');
     }
-    logger.info('Successfully converted PDF to image');
+    log.info('✅ Successfully converted PDF to image');
     return {
       base64Image: imageBuffer.toString('base64'),
       mimeType: 'image/png',
     };
   } catch (err) {
-    logger.error({ err }, 'Failed to convert PDF to image');
+    log.error({ err }, '❌ Failed to convert PDF to image');
     throw new Error(`Failed to convert PDF to image: ${err}`);
   }
 }

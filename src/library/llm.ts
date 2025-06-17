@@ -1,5 +1,13 @@
 import logger from './logger.js';
 
+// Logger interface to support instance tracking
+interface Logger {
+  info: (msg: any, ...args: any[]) => void;
+  error: (msg: any, ...args: any[]) => void;
+  warn: (msg: any, ...args: any[]) => void;
+  debug: (msg: any, ...args: any[]) => void;
+}
+
 interface OpenAIResponse {
   choices: Array<{
     message: {
@@ -19,7 +27,9 @@ export async function extractReceiptDataFromImage(
   base64Image: string,
   mimeType: string,
   messageText: string,
+  instanceLogger?: Logger,
 ): Promise<LLMResult> {
+  const log = instanceLogger || logger; // Use instanceLogger if provided, fallback to default
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
   if (!OPENAI_API_KEY) {
     throw new Error('OPENAI_API_KEY is not set in environment variables.');
@@ -132,7 +142,7 @@ If any field is missing or unclear, do your best to infer or leave it empty with
     !Array.isArray((data as OpenAIResponse).choices) ||
     !(data as OpenAIResponse).choices[0]?.message?.content
   ) {
-    logger.error({ data }, 'No response from OpenAI Vision API');
+    log.error({ data }, '🚨 No response from OpenAI Vision API');
     throw new Error('No response from OpenAI Vision API');
   }
 
@@ -144,9 +154,9 @@ If any field is missing or unclear, do your best to infer or leave it empty with
     const jsonString = content.slice(jsonStart, jsonEnd);
     return JSON.parse(jsonString);
   } catch (err) {
-    logger.error(
+    log.error(
       { err, content: (data as OpenAIResponse).choices[0].message.content },
-      'Failed to parse JSON from LLM response',
+      '❌ Failed to parse JSON from LLM response',
     );
     throw new Error(
       'Failed to parse JSON from LLM response: ' +

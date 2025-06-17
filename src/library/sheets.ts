@@ -1,6 +1,14 @@
 import { google, sheets_v4 } from 'googleapis';
 import logger from './logger.js';
 
+// Logger interface to support instance tracking
+interface Logger {
+  info: (msg: any, ...args: any[]) => void;
+  error: (msg: any, ...args: any[]) => void;
+  warn: (msg: any, ...args: any[]) => void;
+  debug: (msg: any, ...args: any[]) => void;
+}
+
 const credentialsJson = Buffer.from(
   process.env.BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS as string,
   'base64',
@@ -24,7 +32,8 @@ function getSheetsClient(): sheets_v4.Sheets {
   return google.sheets({ version: 'v4', auth });
 }
 
-export async function writeExpenseRow(row: string[]) {
+export async function writeExpenseRow(row: string[], instanceLogger?: Logger) {
+  const log = instanceLogger || logger; // Use instanceLogger if provided, fallback to default
   const sheets = getSheetsClient();
   try {
     // 1. Read column B (Gasto) from the 'junio' tab
@@ -59,9 +68,9 @@ export async function writeExpenseRow(row: string[]) {
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [[row[4], row[5], row[6]]] },
     });
-    logger.info({ row, firstEmptyRow }, 'Expense row written to Google Sheets');
+    log.info({ row, firstEmptyRow }, '📊 Expense row written to Google Sheets');
   } catch (err) {
-    logger.error({ err, row }, 'Failed to write expense row to Google Sheets');
+    log.error({ err, row }, '❌ Failed to write expense row to Google Sheets');
     throw err;
   }
 }
