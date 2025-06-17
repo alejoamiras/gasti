@@ -1,1 +1,0 @@
-worker: exec node dist/bot.js 
