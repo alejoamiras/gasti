@@ -32,6 +32,13 @@ instanceLogger.info(`🚀 Bot instance starting with ID: ${INSTANCE_ID}`);
 instanceLogger.info(`🐳 Process PID: ${process.pid}, Platform: ${process.platform}`);
 instanceLogger.info(`📋 Process title: ${process.title}, Node version: ${process.version}`);
 
+// Check if we're PID 1 (crucial for signal handling in containers)
+if (process.pid === 1) {
+  instanceLogger.info(`✅ Running as PID 1 - signals should work correctly`);
+} else {
+  instanceLogger.warn(`⚠️ Running as PID ${process.pid} - signal forwarding may not work`);
+}
+
 // Add error handling to detect polling conflicts
 const bot = new TelegramBot(token, { polling: true });
 

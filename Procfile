@@ -1,1 +1,1 @@
-worker: yarn start 
+worker: exec node dist/bot.js 
