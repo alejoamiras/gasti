@@ -43,6 +43,25 @@ Create a `.env` file in the project root with the following variables:
 2. Run: `base64 <your-credentials.json>`
 3. Copy the output and set it as the value for `BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS`
 
+## Testing
+
+### Local Testing
+```sh
+yarn test
+```
+
+### CI/Memory-Constrained Testing
+For CI environments or systems with limited memory, use the optimized test script:
+```sh
+yarn test:ci
+```
+
+This script includes memory optimizations:
+- Reduced heap size (`--max-old-space-size=2048`)
+- Serial test execution (`--runInBand`)
+- Memory usage logging (`--logHeapUsage`)
+- Force exit for clean CI runs (`--forceExit`)
+
 ## Next Steps
 
 - Set up CI (GitHub Actions)

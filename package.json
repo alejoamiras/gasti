@@ -9,6 +9,7 @@
     "lint": "eslint src --ext .ts,.js",
     "format": "prettier --write .",
     "test": "jest",
+    "test:ci": "node --max-old-space-size=2048 --expose-gc node_modules/.bin/jest --runInBand --logHeapUsage --forceExit",
     "prepare": "husky"
   },
   "keywords": [],

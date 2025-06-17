@@ -15,4 +15,9 @@ export default {
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
+  // Memory optimization for CI
+  maxWorkers: 1, // Single worker to reduce memory usage
+  workerIdleMemoryLimit: '512MB', // Kill workers that use too much memory
+  clearMocks: true, // Clear mocks between tests
+  restoreMocks: true, // Restore original implementations
 };

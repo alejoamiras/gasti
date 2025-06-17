@@ -22,6 +22,6 @@ jobs:
       - name: Build
         run: yarn build
       - name: Test
-        run: yarn test
+        run: yarn test:ci
       - name: Validate Commit Messages
         run: npx --no -- commitlint --from=HEAD~1
