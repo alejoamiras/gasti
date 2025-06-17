@@ -46,17 +46,21 @@ Create a `.env` file in the project root with the following variables:
 ## Testing
 
 ### Local Testing
+
 ```sh
 yarn test
 ```
 
 ### CI/Memory-Constrained Testing
+
 For CI environments or systems with limited memory, use the optimized test script:
+
 ```sh
 yarn test:ci
 ```
 
 This script includes memory optimizations:
+
 - Reduced heap size (`--max-old-space-size=2048`)
 - Serial test execution (`--runInBand`)
 - Memory usage logging (`--logHeapUsage`)
