@@ -46,12 +46,12 @@ bot.on('webhook_error', (error) => {
 
 instanceLogger.info('✅ Telegram bot polling started successfully');
 
-// Heartbeat to track instance lifecycle (every 30 seconds)
+// Heartbeat to track instance lifecycle (every 1 minute)
 const heartbeatInterval = setInterval(() => {
   if (!isShuttingDown) {
     instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
   }
-}, 30000);
+}, 60000);
 
 // Log when the process is about to exit
 process.on('exit', (code) => {
@@ -81,8 +81,8 @@ const gracefulShutdown = async (signal: string) => {
     instanceLogger.info('✅ Telegram polling stopped successfully');
 
     // Give more time for any ongoing operations to complete and polling to fully stop
-    instanceLogger.info('⏳ Waiting 8 seconds for operations to complete...');
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    instanceLogger.info('⏳ Waiting 5 seconds for operations to complete...');
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     instanceLogger.info('✅ Graceful shutdown completed - exiting cleanly');
     process.exit(0);
