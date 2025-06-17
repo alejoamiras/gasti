@@ -13,7 +13,7 @@
   ],
   "deploy": {
     "base": "node:18-alpine",
-    "startCommand": "yarn start",
+    "startCommand": "exec node dist/bot.js",
     "inputs": ["setup", "install"],
     "restartPolicy": "always"
   }

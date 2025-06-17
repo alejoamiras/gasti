@@ -29,6 +29,8 @@ if (!token) {
 }
 
 instanceLogger.info(`🚀 Bot instance starting with ID: ${INSTANCE_ID}`);
+instanceLogger.info(`🐳 Process PID: ${process.pid}, Platform: ${process.platform}`);
+instanceLogger.info(`📋 Process title: ${process.title}, Node version: ${process.version}`);
 
 // Add error handling to detect polling conflicts
 const bot = new TelegramBot(token, { polling: true });
@@ -105,6 +107,24 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => {
   instanceLogger.info('📨 Received SIGINT signal');
   gracefulShutdown('SIGINT');
+});
+
+// Debug: Log other signals that might be sent
+process.on('SIGHUP', () => {
+  instanceLogger.info('🎯 Received SIGHUP signal');
+});
+
+process.on('SIGQUIT', () => {
+  instanceLogger.info('🎯 Received SIGQUIT signal');
+});
+
+// Debug: Log process events
+process.on('beforeExit', (code) => {
+  instanceLogger.info(`🚪 Process beforeExit with code: ${code}`);
+});
+
+process.on('disconnect', () => {
+  instanceLogger.info('🔌 Process disconnect event');
 });
 
 // Handle uncaught exceptions and unhandled rejections
