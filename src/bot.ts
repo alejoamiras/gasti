@@ -214,8 +214,8 @@ const setupBotHandlers = () => {
 const initializeBot = async () => {
   try {
     // Add startup delay to allow previous instance to shutdown cleanly
-    instanceLogger.info('⏳ Waiting 8 seconds for any previous instance to shutdown...');
-    await new Promise((resolve) => setTimeout(resolve, 8000));
+    instanceLogger.info('⏳ Waiting 15 seconds for any previous instance to shutdown...');
+    await new Promise((resolve) => setTimeout(resolve, 15000));
     instanceLogger.info('🚀 Starting Telegram polling...');
 
     // Initialize bot
