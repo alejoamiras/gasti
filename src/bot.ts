@@ -39,38 +39,12 @@ if (process.pid === 1) {
   instanceLogger.warn(`⚠️ Running as PID ${process.pid} - signal forwarding may not work`);
 }
 
-// Add error handling to detect polling conflicts
-const bot = new TelegramBot(token, { polling: true });
-
-bot.on('polling_error', (error) => {
-  instanceLogger.error('🚨 POLLING ERROR:', error.message);
-  if (error.message.includes('409') || error.message.includes('Conflict')) {
-    instanceLogger.error('🔥 DETECTED POLLING CONFLICT - Multiple instances running!');
-  }
-});
-
-bot.on('webhook_error', (error) => {
-  instanceLogger.error('🚨 WEBHOOK ERROR:', error);
-});
-
-instanceLogger.info('✅ Telegram bot polling started successfully');
-
-// Heartbeat to track instance lifecycle (every 1 minute)
-const heartbeatInterval = setInterval(() => {
-  if (!isShuttingDown) {
-    instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
-  }
-}, 60000);
-
-// Log when the process is about to exit
-process.on('exit', (code) => {
-  clearInterval(heartbeatInterval);
-  instanceLogger.info(`🏁 Process exiting with code: ${code}`);
-});
+// Declare bot variable to be accessible globally
+let bot: TelegramBot;
+let isShuttingDown = false;
+let heartbeatInterval: NodeJS.Timeout;
 
 // Graceful shutdown handling
-let isShuttingDown = false;
-
 const gracefulShutdown = async (signal: string) => {
   if (isShuttingDown) {
     instanceLogger.warn('⚠️ Shutdown already in progress, ignoring signal:', signal);
@@ -82,7 +56,7 @@ const gracefulShutdown = async (signal: string) => {
 
   try {
     // Clear heartbeat interval
-    clearInterval(heartbeatInterval);
+    if (heartbeatInterval) clearInterval(heartbeatInterval);
 
     // Stop polling to prevent new messages - be more aggressive
     instanceLogger.info('🔄 Stopping Telegram polling...');
@@ -105,7 +79,166 @@ const gracefulShutdown = async (signal: string) => {
   }
 };
 
-// Register signal handlers AFTER gracefulShutdown is defined
+// Setup bot event handlers
+const setupBotHandlers = () => {
+  bot.on('polling_error', (error) => {
+    instanceLogger.error('🚨 POLLING ERROR:', error.message);
+    if (error.message.includes('409') || error.message.includes('Conflict')) {
+      instanceLogger.error('🔥 DETECTED POLLING CONFLICT - Multiple instances running!');
+    }
+  });
+
+  bot.on('webhook_error', (error) => {
+    instanceLogger.error('🚨 WEBHOOK ERROR:', error);
+  });
+
+  bot.on('photo', async (msg: TelegramBot.Message) => {
+    // Prevent processing during shutdown
+    if (isShuttingDown) {
+      instanceLogger.warn('⚠️ Ignoring message during shutdown');
+      return;
+    }
+
+    const chatId = msg.chat.id;
+    const username = msg.from?.username || msg.from?.first_name || 'Unknown';
+    const payer = USERNAME_TO_PAYER[username] || username;
+    const messageText = msg.caption || ''; // Extract the caption text
+
+    instanceLogger.info({ username, chatId, messageText }, '📸 Received a receipt photo');
+    bot.sendMessage(chatId, `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`);
+
+    try {
+      // Get the highest resolution photo
+      const photo = msg.photo?.[msg.photo.length - 1];
+      if (!photo) throw new Error('💁🏽 No se encontró ninguna foto en los mensajes');
+      const file = await bot.getFile(photo.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const mimeType = 'image/jpeg'; // Telegram always sends JPEGs
+      const base64Image = buffer.toString('base64');
+
+      // Extract receipt data using LLM
+      const llmResult = await extractReceiptDataFromImage(
+        base64Image,
+        mimeType,
+        messageText,
+        instanceLogger,
+      );
+      instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data');
+
+      // Compose row for Google Sheets
+      const row = [
+        llmResult.title || '',
+        'ARS', // Moneda (always ARS)
+        llmResult.amount || '',
+        llmResult.amount || '', // ARS (repeat for test)
+        payer,
+        llmResult.category || '🤔',
+        llmResult.description || '',
+      ] as string[];
+      await writeExpenseRow(row, instanceLogger);
+      instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
+      bot.sendMessage(chatId, llmResult.summary);
+    } catch (err) {
+      instanceLogger.error({ err }, '❌ Failed to process receipt');
+      bot.sendMessage(chatId, `❌ Failed to process receipt: ${err}`);
+    }
+  });
+
+  bot.on('document', async (msg: TelegramBot.Message) => {
+    // Prevent processing during shutdown
+    if (isShuttingDown) {
+      instanceLogger.warn('⚠️ Ignoring message during shutdown');
+      return;
+    }
+
+    const chatId = msg.chat.id;
+    const username = msg.from?.username || msg.from?.first_name || 'Unknown';
+    const payer = USERNAME_TO_PAYER[username] || username;
+    const messageText = msg.caption || ''; // Extract the caption text
+
+    // Check if it's a PDF
+    if (!msg.document?.mime_type?.includes('pdf')) {
+      bot.sendMessage(chatId, '❌ Please send a PDF file.');
+      return;
+    }
+
+    instanceLogger.info({ username, chatId, messageText }, '📄 Received a PDF receipt');
+    bot.sendMessage(chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
+
+    try {
+      // Get the PDF file
+      const file = await bot.getFile(msg.document.file_id);
+      const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
+      const response = await fetch(fileUrl);
+      const arrayBuffer = await response.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      instanceLogger.debug('📦 Buffer received');
+      // Convert PDF to images
+      const image = await convertPdfToImages(buffer, instanceLogger);
+      instanceLogger.debug('🖼️ Converted PDF to image');
+
+      // Process only the first page (one-page PDF assumption)
+      const { base64Image, mimeType } = image;
+      // Extract receipt data using LLM
+      const llmResult = await extractReceiptDataFromImage(
+        base64Image,
+        mimeType,
+        messageText,
+        instanceLogger,
+      );
+      instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data from PDF');
+
+      // Compose row for Google Sheets
+      const row = [
+        llmResult.title || '',
+        'ARS', // Moneda (always ARS)
+        llmResult.amount || '',
+        llmResult.amount || '', // ARS (repeat for test)
+        payer,
+        llmResult.category || '🤔',
+        llmResult.description || '',
+      ] as string[];
+      await writeExpenseRow(row, instanceLogger);
+      instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
+      bot.sendMessage(chatId, llmResult.summary);
+    } catch (err) {
+      instanceLogger.error({ err }, '❌ Failed to process PDF receipt');
+      bot.sendMessage(chatId, `❌ Failed to process PDF receipt: ${err}`);
+    }
+  });
+};
+
+// Initialize bot with startup delay
+const initializeBot = async () => {
+  try {
+    // Add startup delay to allow previous instance to shutdown cleanly
+    instanceLogger.info('⏳ Waiting 8 seconds for any previous instance to shutdown...');
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+    instanceLogger.info('🚀 Starting Telegram polling...');
+
+    // Initialize bot
+    bot = new TelegramBot(token, { polling: true });
+
+    // Setup all event handlers
+    setupBotHandlers();
+
+    instanceLogger.info('✅ Telegram bot polling started successfully');
+
+    // Heartbeat to track instance lifecycle (every 1 minute)
+    heartbeatInterval = setInterval(() => {
+      if (!isShuttingDown) {
+        instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
+      }
+    }, 60000);
+  } catch (error) {
+    instanceLogger.error('❌ Failed to initialize bot:', error);
+    process.exit(1);
+  }
+};
+
+// Register signal handlers
 process.on('SIGTERM', () => {
   instanceLogger.info('📨 Received SIGTERM signal');
   gracefulShutdown('SIGTERM');
@@ -134,6 +267,12 @@ process.on('disconnect', () => {
   instanceLogger.info('🔌 Process disconnect event');
 });
 
+// Log when the process is about to exit
+process.on('exit', (code) => {
+  if (heartbeatInterval) clearInterval(heartbeatInterval);
+  instanceLogger.info(`🏁 Process exiting with code: ${code}`);
+});
+
 // Handle uncaught exceptions and unhandled rejections
 process.on('uncaughtException', (error) => {
   instanceLogger.error('💥 Uncaught Exception:', error);
@@ -145,119 +284,5 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('unhandledRejection');
 });
 
-bot.on('photo', async (msg: TelegramBot.Message) => {
-  // Prevent processing during shutdown
-  if (isShuttingDown) {
-    instanceLogger.warn('⚠️ Ignoring message during shutdown');
-    return;
-  }
-
-  const chatId = msg.chat.id;
-  const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-  const payer = USERNAME_TO_PAYER[username] || username;
-  const messageText = msg.caption || ''; // Extract the caption text
-
-  instanceLogger.info({ username, chatId, messageText }, '📸 Received a receipt photo');
-  bot.sendMessage(chatId, `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`);
-
-  try {
-    // Get the highest resolution photo
-    const photo = msg.photo?.[msg.photo.length - 1];
-    if (!photo) throw new Error('💁🏽 No se encontró ninguna foto en los mensajes');
-    const file = await bot.getFile(photo.file_id);
-    const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-    const response = await fetch(fileUrl);
-    const buffer = Buffer.from(await response.arrayBuffer());
-    const mimeType = 'image/jpeg'; // Telegram always sends JPEGs
-    const base64Image = buffer.toString('base64');
-
-    // Extract receipt data using LLM
-    const llmResult = await extractReceiptDataFromImage(
-      base64Image,
-      mimeType,
-      messageText,
-      instanceLogger,
-    );
-    instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data');
-
-    // Compose row for Google Sheets
-    const row = [
-      llmResult.title || '',
-      'ARS', // Moneda (always ARS)
-      llmResult.amount || '',
-      llmResult.amount || '', // ARS (repeat for test)
-      payer,
-      llmResult.category || '🤔',
-      llmResult.description || '',
-    ] as string[];
-    await writeExpenseRow(row, instanceLogger);
-    instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
-    bot.sendMessage(chatId, llmResult.summary);
-  } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to process receipt');
-    bot.sendMessage(chatId, `❌ Failed to process receipt: ${err}`);
-  }
-});
-
-bot.on('document', async (msg: TelegramBot.Message) => {
-  // Prevent processing during shutdown
-  if (isShuttingDown) {
-    instanceLogger.warn('⚠️ Ignoring message during shutdown');
-    return;
-  }
-
-  const chatId = msg.chat.id;
-  const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-  const payer = USERNAME_TO_PAYER[username] || username;
-  const messageText = msg.caption || ''; // Extract the caption text
-
-  // Check if it's a PDF
-  if (!msg.document?.mime_type?.includes('pdf')) {
-    bot.sendMessage(chatId, '❌ Please send a PDF file.');
-    return;
-  }
-
-  instanceLogger.info({ username, chatId, messageText }, '📄 Received a PDF receipt');
-  bot.sendMessage(chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
-
-  try {
-    // Get the PDF file
-    const file = await bot.getFile(msg.document.file_id);
-    const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-    const response = await fetch(fileUrl);
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
-    instanceLogger.debug('📦 Buffer received');
-    // Convert PDF to images
-    const image = await convertPdfToImages(buffer, instanceLogger);
-    instanceLogger.debug('🖼️ Converted PDF to image');
-
-    // Process only the first page (one-page PDF assumption)
-    const { base64Image, mimeType } = image;
-    // Extract receipt data using LLM
-    const llmResult = await extractReceiptDataFromImage(
-      base64Image,
-      mimeType,
-      messageText,
-      instanceLogger,
-    );
-    instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data from PDF');
-
-    // Compose row for Google Sheets
-    const row = [
-      llmResult.title || '',
-      'ARS', // Moneda (always ARS)
-      llmResult.amount || '',
-      llmResult.amount || '', // ARS (repeat for test)
-      payer,
-      llmResult.category || '🤔',
-      llmResult.description || '',
-    ] as string[];
-    await writeExpenseRow(row, instanceLogger);
-    instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
-    bot.sendMessage(chatId, llmResult.summary);
-  } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to process PDF receipt');
-    bot.sendMessage(chatId, `❌ Failed to process PDF receipt: ${err}`);
-  }
-});
+// Start the bot
+initializeBot();
