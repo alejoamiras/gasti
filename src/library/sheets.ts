@@ -1,13 +1,6 @@
 import { google, sheets_v4 } from 'googleapis';
 import logger from './logger.js';
-
-// Logger interface to support instance tracking
-interface Logger {
-  info: (msg: any, ...args: any[]) => void;
-  error: (msg: any, ...args: any[]) => void;
-  warn: (msg: any, ...args: any[]) => void;
-  debug: (msg: any, ...args: any[]) => void;
-}
+import type { Logger } from 'pino';
 
 const credentialsJson = Buffer.from(
   process.env.BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS as string,

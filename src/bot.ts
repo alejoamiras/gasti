@@ -5,17 +5,13 @@ import { extractReceiptDataFromImage } from './library/llm.js';
 import logger from './library/logger.js';
 import { convertPdfToImages } from './library/pdf.js';
 import { randomBytes } from 'crypto';
+import type { Logger } from 'pino';
 
 // Generate unique instance ID for tracking
 const INSTANCE_ID = `${Date.now()}-${randomBytes(4).toString('hex')}`;
 
-// Create instance-aware logger
-const instanceLogger = {
-  info: (msg: any, ...args: any[]) => logger.info(`[${INSTANCE_ID}] ${msg}`, ...args),
-  error: (msg: any, ...args: any[]) => logger.error(`[${INSTANCE_ID}] ${msg}`, ...args),
-  warn: (msg: any, ...args: any[]) => logger.warn(`[${INSTANCE_ID}] ${msg}`, ...args),
-  debug: (msg: any, ...args: any[]) => logger.debug(`[${INSTANCE_ID}] ${msg}`, ...args),
-};
+// Create instance-aware logger using Pino's child logger (inherits ALL Logger methods)
+const instanceLogger: Logger = logger.child({ instanceId: INSTANCE_ID });
 
 const USERNAME_TO_PAYER: Record<string, string> = {
   alejoamiras: 'alejo',
