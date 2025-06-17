@@ -1,6 +1,7 @@
 /** @type {import("jest").Config} **/
 export default {
   testEnvironment: 'node',
+  setupFilesAfterEnv: ['<rootDir>/src/test-setup.ts'],
   transform: {
     '^.+\\.tsx?$': [
       'ts-jest',

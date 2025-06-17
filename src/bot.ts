@@ -280,5 +280,7 @@ process.on('unhandledRejection', (reason, promise) => {
   gracefulShutdown('unhandledRejection');
 });
 
-// Start the bot
-initializeBot();
+// Start the bot (only if not in test environment)
+if (process.env.NODE_ENV !== 'test') {
+  initializeBot();
+}
