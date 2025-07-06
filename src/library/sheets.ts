@@ -25,14 +25,35 @@ function getSheetsClient(): sheets_v4.Sheets {
   return google.sheets({ version: 'v4', auth });
 }
 
+function getCurrentMonthInSpanish(): string {
+  const monthsInSpanish = [
+    'enero',
+    'febrero',
+    'marzo',
+    'abril',
+    'mayo',
+    'junio',
+    'julio',
+    'agosto',
+    'septiembre',
+    'octubre',
+    'noviembre',
+    'diciembre',
+  ];
+  const currentMonth = new Date().getMonth(); // 0-11
+  return monthsInSpanish[currentMonth];
+}
+
 export async function writeExpenseRow(row: string[], instanceLogger?: Logger) {
   const log = instanceLogger || logger; // Use instanceLogger if provided, fallback to default
   const sheets = getSheetsClient();
+  const currentMonth = getCurrentMonthInSpanish();
+
   try {
-    // 1. Read column B (Gasto) from the 'junio' tab
+    // 1. Read column B (Gasto) from the current month's tab
     const res = await sheets.spreadsheets.values.get({
       spreadsheetId,
-      range: 'junio!B3:B',
+      range: `${currentMonth}!B3:B`,
     });
     const values = res.data.values || [];
     // 2. Find the first empty row, starting from row 3
@@ -50,14 +71,14 @@ export async function writeExpenseRow(row: string[], instanceLogger?: Logger) {
     // 3. Write B-D (Gasto, Moneda, Monto)
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `junio!B${firstEmptyRow}:D${firstEmptyRow}`,
+      range: `${currentMonth}!B${firstEmptyRow}:D${firstEmptyRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [[row[0], row[1], row[2]]] },
     });
     // 4. Write F-H (Paga, Tipo de Gasto, Comments)
     await sheets.spreadsheets.values.update({
       spreadsheetId,
-      range: `junio!F${firstEmptyRow}:H${firstEmptyRow}`,
+      range: `${currentMonth}!F${firstEmptyRow}:H${firstEmptyRow}`,
       valueInputOption: 'USER_ENTERED',
       requestBody: { values: [[row[4], row[5], row[6]]] },
     });
