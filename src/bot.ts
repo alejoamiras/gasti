@@ -1,22 +1,22 @@
 import 'dotenv/config';
 import TelegramBot from 'node-telegram-bot-api';
-import { writeExpenseRow } from './library/sheets.js';
-import { extractReceiptDataFromImage } from './library/llm.js';
 import logger from './library/logger.js';
-import { convertPdfToImages } from './library/pdf.js';
 import { randomBytes } from 'crypto';
 import type { Logger } from 'pino';
+import {
+  extractUserInfo,
+  extractUserInfoFromText,
+  processPhotoInput,
+  processPdfInput,
+  handleReceiptProcessing,
+  handleTextExpenseProcessing,
+} from './library/bot-helpers.js';
 
 // Generate unique instance ID for tracking
 const INSTANCE_ID = `${Date.now()}-${randomBytes(4).toString('hex')}`;
 
 // Create instance-aware logger using Pino's child logger (inherits ALL Logger methods)
 const instanceLogger: Logger = logger.child({ instanceId: INSTANCE_ID });
-
-const USERNAME_TO_PAYER: Record<string, string> = {
-  alejoamiras: 'alejo',
-  morafreaza: 'mora',
-};
 
 const token = process.env.TELEGRAM_BOT_TOKEN || '';
 
@@ -60,18 +60,26 @@ const gracefulShutdown = async (signal: string) => {
     instanceLogger.info('✅ Telegram polling stopped successfully');
 
     // Give more time for any ongoing operations to complete and polling to fully stop
-    instanceLogger.info('⏳ Waiting 5 seconds for operations to complete...');
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (process.env.NODE_ENV !== 'test') {
+      instanceLogger.info('⏳ Waiting 5 seconds for operations to complete...');
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
 
     instanceLogger.info('✅ Graceful shutdown completed - exiting cleanly');
     process.exit(0);
   } catch (error) {
     instanceLogger.error('❌ Error during graceful shutdown:', error);
     // Force exit even if there's an error to avoid hanging
-    setTimeout(() => {
-      instanceLogger.error('💥 Force exiting due to shutdown timeout');
+    // Skip timeout in test environment to prevent open handles
+    if (process.env.NODE_ENV !== 'test') {
+      setTimeout(() => {
+        instanceLogger.error('💥 Force exiting due to shutdown timeout');
+        process.exit(1);
+      }, 2000);
+    } else {
+      // In tests, just exit immediately to avoid hanging
       process.exit(1);
-    }, 2000);
+    }
   }
 };
 
@@ -95,50 +103,27 @@ const setupBotHandlers = () => {
       return;
     }
 
-    const chatId = msg.chat.id;
-    const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-    const payer = USERNAME_TO_PAYER[username] || username;
-    const messageText = msg.caption || ''; // Extract the caption text
+    const userInfo = extractUserInfo(msg);
 
-    instanceLogger.info({ username, chatId, messageText }, '📸 Received a receipt photo');
-    bot.sendMessage(chatId, `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`);
+    instanceLogger.info(
+      { username: userInfo.username, chatId: userInfo.chatId, messageText: userInfo.messageText },
+      '📸 Received a receipt photo',
+    );
+    bot.sendMessage(
+      userInfo.chatId,
+      `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`,
+    );
 
     try {
       // Get the highest resolution photo
       const photo = msg.photo?.[msg.photo.length - 1];
       if (!photo) throw new Error('💁🏽 No se encontró ninguna foto en los mensajes');
-      const file = await bot.getFile(photo.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const mimeType = 'image/jpeg'; // Telegram always sends JPEGs
-      const base64Image = buffer.toString('base64');
 
-      // Extract receipt data using LLM
-      const llmResult = await extractReceiptDataFromImage(
-        base64Image,
-        mimeType,
-        messageText,
-        instanceLogger,
-      );
-      instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data');
-
-      // Compose row for Google Sheets
-      const row = [
-        llmResult.title || '',
-        'ARS', // Moneda (always ARS)
-        llmResult.amount || '',
-        llmResult.amount || '', // ARS (repeat for test)
-        payer,
-        llmResult.category || '🤔',
-        llmResult.description || '',
-      ] as string[];
-      await writeExpenseRow(row, instanceLogger);
-      instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
-      bot.sendMessage(chatId, llmResult.summary);
+      const processedInput = await processPhotoInput(photo, bot, token);
+      await handleReceiptProcessing(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process receipt');
-      bot.sendMessage(chatId, `❌ Failed to process receipt: ${err}`);
+      bot.sendMessage(userInfo.chatId, `❌ Failed to process receipt: ${err}`);
     }
   });
 
@@ -149,59 +134,55 @@ const setupBotHandlers = () => {
       return;
     }
 
-    const chatId = msg.chat.id;
-    const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-    const payer = USERNAME_TO_PAYER[username] || username;
-    const messageText = msg.caption || ''; // Extract the caption text
+    const userInfo = extractUserInfo(msg);
 
     // Check if it's a PDF
     if (!msg.document?.mime_type?.includes('pdf')) {
-      bot.sendMessage(chatId, '❌ Please send a PDF file.');
+      bot.sendMessage(userInfo.chatId, '❌ Please send a PDF file.');
       return;
     }
 
-    instanceLogger.info({ username, chatId, messageText }, '📄 Received a PDF receipt');
-    bot.sendMessage(chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
+    instanceLogger.info(
+      { username: userInfo.username, chatId: userInfo.chatId, messageText: userInfo.messageText },
+      '📄 Received a PDF receipt',
+    );
+    bot.sendMessage(userInfo.chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
 
     try {
-      // Get the PDF file
-      const file = await bot.getFile(msg.document.file_id);
-      const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-      const response = await fetch(fileUrl);
-      const arrayBuffer = await response.arrayBuffer();
-      const buffer = Buffer.from(arrayBuffer);
-      instanceLogger.debug('📦 Buffer received');
-      // Convert PDF to images
-      const image = await convertPdfToImages(buffer, instanceLogger);
-      instanceLogger.debug('🖼️ Converted PDF to image');
-
-      // Process only the first page (one-page PDF assumption)
-      const { base64Image, mimeType } = image;
-      // Extract receipt data using LLM
-      const llmResult = await extractReceiptDataFromImage(
-        base64Image,
-        mimeType,
-        messageText,
-        instanceLogger,
-      );
-      instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data from PDF');
-
-      // Compose row for Google Sheets
-      const row = [
-        llmResult.title || '',
-        'ARS', // Moneda (always ARS)
-        llmResult.amount || '',
-        llmResult.amount || '', // ARS (repeat for test)
-        payer,
-        llmResult.category || '🤔',
-        llmResult.description || '',
-      ] as string[];
-      await writeExpenseRow(row, instanceLogger);
-      instanceLogger.info({ username, row }, '📊 Expense added to Google Sheets');
-      bot.sendMessage(chatId, llmResult.summary);
+      const processedInput = await processPdfInput(msg.document, bot, token, instanceLogger);
+      await handleReceiptProcessing(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process PDF receipt');
-      bot.sendMessage(chatId, `❌ Failed to process PDF receipt: ${err}`);
+      bot.sendMessage(userInfo.chatId, `❌ Failed to process PDF receipt: ${err}`);
+    }
+  });
+
+  bot.on('text', async (msg: TelegramBot.Message) => {
+    // Prevent processing during shutdown
+    if (isShuttingDown) {
+      instanceLogger.warn('⚠️ Ignoring message during shutdown');
+      return;
+    }
+
+    // Ignore commands (starting with /)
+    if (msg.text?.startsWith('/')) {
+      return;
+    }
+
+    const userInfo = extractUserInfoFromText(msg);
+    const text = msg.text || '';
+
+    instanceLogger.info(
+      { username: userInfo.username, chatId: userInfo.chatId, text },
+      '💬 Received a text expense',
+    );
+    bot.sendMessage(userInfo.chatId, `💭 Procesando tu gasto...`);
+
+    try {
+      await handleTextExpenseProcessing(userInfo, text, bot, instanceLogger);
+    } catch (err) {
+      instanceLogger.error({ err }, '❌ Failed to process text expense');
+      bot.sendMessage(userInfo.chatId, `❌ Failed to process expense: ${err}`);
     }
   });
 };
@@ -223,14 +204,32 @@ const initializeBot = async () => {
     instanceLogger.info('✅ Telegram bot polling started successfully');
 
     // Heartbeat to track instance lifecycle (every 1 minute)
-    heartbeatInterval = setInterval(() => {
-      if (!isShuttingDown) {
-        instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
-      }
-    }, 60000);
+    if (process.env.NODE_ENV !== 'test') {
+      heartbeatInterval = setInterval(() => {
+        if (!isShuttingDown) {
+          instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
+        }
+      }, 60000);
+    }
   } catch (error) {
     instanceLogger.error('❌ Failed to initialize bot:', error);
     process.exit(1);
+  }
+};
+
+// Test-friendly initialization without delay
+export const initializeBotForTests = async () => {
+  try {
+    // Initialize bot without delay for tests
+    bot = new TelegramBot(token, { polling: true });
+    setupBotHandlers();
+
+    // Don't start heartbeat in tests to avoid timer leaks
+
+    return bot;
+  } catch (error) {
+    instanceLogger.error('❌ Failed to initialize bot:', error);
+    throw error;
   }
 };
 
@@ -284,3 +283,6 @@ process.on('unhandledRejection', (reason, promise) => {
 if (process.env.NODE_ENV !== 'test') {
   initializeBot();
 }
+
+// Export for tests
+export { bot, gracefulShutdown };
