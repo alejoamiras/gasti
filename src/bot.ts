@@ -71,10 +71,16 @@ const gracefulShutdown = async (signal: string) => {
   } catch (error) {
     instanceLogger.error('❌ Error during graceful shutdown:', error);
     // Force exit even if there's an error to avoid hanging
-    setTimeout(() => {
-      instanceLogger.error('💥 Force exiting due to shutdown timeout');
+    // Skip timeout in test environment to prevent open handles
+    if (process.env.NODE_ENV !== 'test') {
+      setTimeout(() => {
+        instanceLogger.error('💥 Force exiting due to shutdown timeout');
+        process.exit(1);
+      }, 2000);
+    } else {
+      // In tests, just exit immediately to avoid hanging
       process.exit(1);
-    }, 2000);
+    }
   }
 };
 

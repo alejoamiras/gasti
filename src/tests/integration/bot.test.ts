@@ -54,6 +54,7 @@ jest.mock('googleapis', () => ({
 describe('Bot Initialization', () => {
   let originalEnv: NodeJS.ProcessEnv;
   let originalExit: typeof process.exit;
+  let mockBot: any;
 
   beforeEach(() => {
     // Save original environment
@@ -66,9 +67,24 @@ describe('Bot Initialization', () => {
     // Mock process.exit to prevent actual exit
     originalExit = process.exit;
     process.exit = jest.fn() as any;
+    // Reset mockBot
+    mockBot = null;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up any bot instances
+    if (mockBot && mockBot.stopPolling) {
+      try {
+        await mockBot.stopPolling({ cancel: true });
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    }
+    // Remove any process event listeners that may have been added
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('uncaughtException');
+    process.removeAllListeners('unhandledRejection');
     // Restore original environment
     process.env = originalEnv;
     process.exit = originalExit;
@@ -93,7 +109,7 @@ describe('Bot Initialization', () => {
 
   it('should register all required event handlers', async () => {
     // Create a mock bot instance
-    const mockBot = {
+    mockBot = {
       on: jest.fn(),
       stopPolling: jest.fn(() => Promise.resolve()),
       sendMessage: jest.fn(() => Promise.resolve({})),
@@ -126,6 +142,7 @@ describe('Bot Initialization', () => {
 describe('Bot Shutdown', () => {
   let originalEnv: NodeJS.ProcessEnv;
   let originalExit: typeof process.exit;
+  let mockBot: any;
 
   beforeEach(() => {
     // Save original environment
@@ -137,9 +154,24 @@ describe('Bot Shutdown', () => {
     // Mock process.exit to prevent actual exit
     originalExit = process.exit;
     process.exit = jest.fn() as any;
+    // Reset mockBot
+    mockBot = null;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    // Clean up any bot instances
+    if (mockBot && mockBot.stopPolling) {
+      try {
+        await mockBot.stopPolling({ cancel: true });
+      } catch (error) {
+        // Ignore cleanup errors
+      }
+    }
+    // Remove any process event listeners that may have been added
+    process.removeAllListeners('SIGTERM');
+    process.removeAllListeners('SIGINT');
+    process.removeAllListeners('uncaughtException');
+    process.removeAllListeners('unhandledRejection');
     // Restore original environment
     process.env = originalEnv;
     process.exit = originalExit;
@@ -148,7 +180,7 @@ describe('Bot Shutdown', () => {
 
   it('should handle SIGTERM gracefully', async () => {
     // Create a mock bot instance
-    const mockBot = {
+    mockBot = {
       on: jest.fn(),
       stopPolling: jest.fn(() => Promise.resolve()),
       sendMessage: jest.fn(() => Promise.resolve({})),
