@@ -10,6 +10,7 @@
     "format": "prettier --write .",
     "test": "jest",
     "test:ci": "node --max-old-space-size=2048 --expose-gc node_modules/.bin/jest --runInBand --logHeapUsage --forceExit",
+    "test:bot-init": "NODE_ENV=test jest src/bot.test.ts --testNamePattern='should initialize bot without throwing errors|should compile without errors'",
     "prepare": "husky"
   },
   "keywords": [],

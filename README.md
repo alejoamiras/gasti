@@ -1,5 +1,35 @@
 # Expense Tracking Telegram Bot
 
+A Telegram bot that helps you track expenses by processing receipts (images/PDFs) and text messages, automatically logging them to Google Sheets.
+
+## Features
+
+- 📸 **Photo Receipt Processing**: Send a photo of a receipt and the bot extracts expense data
+- 📄 **PDF Receipt Processing**: Upload PDF receipts for automatic data extraction
+- 💬 **Text Expense Logging**: Send expense details as text without needing a receipt
+- 🤖 **AI-Powered**: Uses GPT-4 Vision for intelligent data extraction
+- 📊 **Google Sheets Integration**: Automatically logs expenses to your spreadsheet
+- 🇦🇷 **Localized for Argentina**: Understands Spanish and local terminology
+
+## How to Use
+
+### Photo/PDF Receipts
+
+1. Take a photo of your receipt or save it as PDF
+2. Send it to the bot (optionally with a caption for context)
+3. The bot extracts the data and logs it to Google Sheets
+
+### Text Expenses
+
+Send a text message with expense details. The bot understands various formats:
+
+- Simple: `"Almuerzo 1500 🍕"`
+- Descriptive: `"Pagué $2500 en el super por compras de la semana"`
+- English/Spanish mix: `"Uber to airport: 3200 ARS"`
+- Abbreviated: `"Super chino 5430"` or `"Café con Mora 2800"`
+
+The bot will intelligently parse the text, categorize the expense, and log it.
+
 ## Setup
 
 1. Install dependencies:
@@ -50,6 +80,20 @@ Create a `.env` file in the project root with the following variables:
 ```sh
 yarn test
 ```
+
+### Bot Initialization Testing
+
+To verify the bot can start without errors (useful before deployment):
+
+```sh
+yarn test:bot-init
+```
+
+This runs critical tests to ensure:
+
+- TypeScript compiles without errors
+- Bot initializes successfully with mocked dependencies
+- All message handlers are properly registered
 
 ### CI/Memory-Constrained Testing
 
