@@ -11,6 +11,7 @@ export default {
     ],
   },
   roots: ['<rootDir>/src'],
+  testMatch: ['<rootDir>/src/tests/**/*.test.ts', '<rootDir>/src/**/*.test.ts'],
   extensionsToTreatAsEsm: ['.ts'],
   moduleNameMapper: {
     '^(\\.{1,2}/.*)\\.js$': '$1',

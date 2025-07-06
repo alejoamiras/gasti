@@ -61,8 +61,10 @@ const gracefulShutdown = async (signal: string) => {
     instanceLogger.info('✅ Telegram polling stopped successfully');
 
     // Give more time for any ongoing operations to complete and polling to fully stop
-    instanceLogger.info('⏳ Waiting 5 seconds for operations to complete...');
-    await new Promise((resolve) => setTimeout(resolve, 5000));
+    if (process.env.NODE_ENV !== 'test') {
+      instanceLogger.info('⏳ Waiting 5 seconds for operations to complete...');
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
 
     instanceLogger.info('✅ Graceful shutdown completed - exiting cleanly');
     process.exit(0);
@@ -197,14 +199,32 @@ const initializeBot = async () => {
     instanceLogger.info('✅ Telegram bot polling started successfully');
 
     // Heartbeat to track instance lifecycle (every 1 minute)
-    heartbeatInterval = setInterval(() => {
-      if (!isShuttingDown) {
-        instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
-      }
-    }, 60000);
+    if (process.env.NODE_ENV !== 'test') {
+      heartbeatInterval = setInterval(() => {
+        if (!isShuttingDown) {
+          instanceLogger.info(`💗 Instance heartbeat - uptime: ${Math.floor(process.uptime())}s`);
+        }
+      }, 60000);
+    }
   } catch (error) {
     instanceLogger.error('❌ Failed to initialize bot:', error);
     process.exit(1);
+  }
+};
+
+// Test-friendly initialization without delay
+export const initializeBotForTests = async () => {
+  try {
+    // Initialize bot without delay for tests
+    bot = new TelegramBot(token, { polling: true });
+    setupBotHandlers();
+
+    // Don't start heartbeat in tests to avoid timer leaks
+
+    return bot;
+  } catch (error) {
+    instanceLogger.error('❌ Failed to initialize bot:', error);
+    throw error;
   }
 };
 
@@ -258,3 +278,6 @@ process.on('unhandledRejection', (reason, promise) => {
 if (process.env.NODE_ENV !== 'test') {
   initializeBot();
 }
+
+// Export for tests
+export { bot, gracefulShutdown };

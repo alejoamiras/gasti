@@ -75,25 +75,15 @@ Create a `.env` file in the project root with the following variables:
 
 ## Testing
 
+Tests are organized into unit and integration tests in the `src/tests/` directory.
+
 ### Local Testing
+
+Run all tests:
 
 ```sh
 yarn test
 ```
-
-### Bot Initialization Testing
-
-To verify the bot can start without errors (useful before deployment):
-
-```sh
-yarn test:bot-init
-```
-
-This runs critical tests to ensure:
-
-- TypeScript compiles without errors
-- Bot initializes successfully with mocked dependencies
-- All message handlers are properly registered
 
 ### CI/Memory-Constrained Testing
 

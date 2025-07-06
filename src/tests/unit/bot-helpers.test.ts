@@ -5,10 +5,10 @@ import {
   extractUserInfoFromText,
   processTextInput,
   processExpense,
-} from './bot-helpers.js';
+} from '../../library/bot-helpers.js';
 
 // Mock dependencies
-jest.mock('./sheets.js', () => ({
+jest.mock('../../library/sheets.js', () => ({
   writeExpenseRow: jest.fn(),
 }));
 
@@ -109,7 +109,7 @@ describe('Bot Helpers', () => {
   });
 
   describe('processExpense', () => {
-    const { writeExpenseRow } = require('./sheets.js');
+    const { writeExpenseRow } = require('../../library/sheets.js');
 
     it('should process expense and send success message', async () => {
       const llmResult = {
