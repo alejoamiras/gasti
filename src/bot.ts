@@ -8,7 +8,6 @@ import {
   extractUserInfoFromText,
   processPhotoInput,
   processPdfInput,
-  processTextInput,
   handleReceiptProcessing,
   handleTextExpenseProcessing,
 } from './library/bot-helpers.js';

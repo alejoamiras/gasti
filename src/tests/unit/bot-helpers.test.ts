@@ -12,15 +12,22 @@ jest.mock('../../library/sheets.js', () => ({
   writeExpenseRow: jest.fn(),
 }));
 
+import { writeExpenseRow } from '../../library/sheets.js';
+
 const mockBot = {
   sendMessage: jest.fn(),
-};
+} as { sendMessage: jest.Mock };
 
 const mockLogger = {
   info: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
   warn: jest.fn(),
+} as {
+  info: jest.Mock;
+  error: jest.Mock;
+  debug: jest.Mock;
+  warn: jest.Mock;
 };
 
 describe('Bot Helpers', () => {
@@ -109,8 +116,6 @@ describe('Bot Helpers', () => {
   });
 
   describe('processExpense', () => {
-    const { writeExpenseRow } = require('../../library/sheets.js');
-
     it('should process expense and send success message', async () => {
       const llmResult = {
         title: 'Supermercado',
@@ -127,7 +132,7 @@ describe('Bot Helpers', () => {
         messageText: 'super 1500',
       };
 
-      await processExpense(llmResult, userInfo, mockBot as any, mockLogger as any);
+      await processExpense(llmResult, userInfo, mockBot as never, mockLogger as never);
 
       expect(writeExpenseRow).toHaveBeenCalledWith(
         ['Supermercado', 'ARS', '1500', '1500', 'alejo', '🛒', 'Compras del super'],
@@ -139,7 +144,7 @@ describe('Bot Helpers', () => {
 
     it('should handle errors when saving expense', async () => {
       const error = new Error('Database error');
-      writeExpenseRow.mockRejectedValueOnce(error);
+      jest.mocked(writeExpenseRow).mockRejectedValueOnce(error);
 
       const llmResult = {
         title: 'Test',
@@ -157,7 +162,7 @@ describe('Bot Helpers', () => {
       };
 
       await expect(
-        processExpense(llmResult, userInfo, mockBot as any, mockLogger as any),
+        processExpense(llmResult, userInfo, mockBot as never, mockLogger as never),
       ).rejects.toThrow('Database error');
 
       expect(mockLogger.error).toHaveBeenCalled();

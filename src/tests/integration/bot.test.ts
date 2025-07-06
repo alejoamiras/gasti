@@ -54,7 +54,12 @@ jest.mock('googleapis', () => ({
 describe('Bot Initialization', () => {
   let originalEnv: NodeJS.ProcessEnv;
   let originalExit: typeof process.exit;
-  let mockBot: any;
+  let mockBot: {
+    on: jest.Mock;
+    stopPolling: jest.Mock;
+    sendMessage: jest.Mock;
+    getFile: jest.Mock;
+  } | null;
 
   beforeEach(() => {
     // Save original environment
@@ -66,7 +71,7 @@ describe('Bot Initialization', () => {
     jest.resetModules();
     // Mock process.exit to prevent actual exit
     originalExit = process.exit;
-    process.exit = jest.fn() as any;
+    process.exit = jest.fn() as never;
     // Reset mockBot
     mockBot = null;
   });
@@ -76,7 +81,7 @@ describe('Bot Initialization', () => {
     if (mockBot && mockBot.stopPolling) {
       try {
         await mockBot.stopPolling({ cancel: true });
-      } catch (error) {
+      } catch {
         // Ignore cleanup errors
       }
     }
@@ -142,7 +147,12 @@ describe('Bot Initialization', () => {
 describe('Bot Shutdown', () => {
   let originalEnv: NodeJS.ProcessEnv;
   let originalExit: typeof process.exit;
-  let mockBot: any;
+  let mockBot: {
+    on: jest.Mock;
+    stopPolling: jest.Mock;
+    sendMessage: jest.Mock;
+    getFile: jest.Mock;
+  } | null;
 
   beforeEach(() => {
     // Save original environment
@@ -153,7 +163,7 @@ describe('Bot Shutdown', () => {
     jest.resetModules();
     // Mock process.exit to prevent actual exit
     originalExit = process.exit;
-    process.exit = jest.fn() as any;
+    process.exit = jest.fn() as never;
     // Reset mockBot
     mockBot = null;
   });
@@ -163,7 +173,7 @@ describe('Bot Shutdown', () => {
     if (mockBot && mockBot.stopPolling) {
       try {
         await mockBot.stopPolling({ cancel: true });
-      } catch (error) {
+      } catch {
         // Ignore cleanup errors
       }
     }
@@ -196,7 +206,7 @@ describe('Bot Shutdown', () => {
     await botModule.initializeBotForTests();
 
     // Simulate SIGTERM
-    process.emit('SIGTERM' as any);
+    process.emit('SIGTERM');
 
     // Wait a bit for async operations
     await new Promise((resolve) => setTimeout(resolve, 100));
