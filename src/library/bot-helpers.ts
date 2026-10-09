@@ -108,7 +108,7 @@ export async function processExpense(
   await notify(bot, userInfo.chatId, formatConfirmation(expense, tab, row), instanceLogger);
 }
 
-/** Downloads a Telegram file. Errors never include the URL, which embeds the bot token. */
+/** Downloads a Telegram file; the URL embeds the bot token, so a failure reports only the status. */
 async function downloadTelegramFile(fileId: string, bot: TelegramBot, token: string) {
   const file = await bot.getFile(fileId);
   const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
