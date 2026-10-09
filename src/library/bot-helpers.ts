@@ -1,19 +1,14 @@
 import TelegramBot from 'node-telegram-bot-api';
 import type { Logger } from 'pino';
 import { writeExpenseRow } from './sheets.js';
-import { extractReceiptDataFromImage, extractReceiptDataFromText } from './llm.js';
+import { extractExpense, type ExpenseInput, type ExtractedExpense } from './llm.js';
 import { convertPdfToImages } from './pdf.js';
-
-// Map of Telegram usernames to payer names
-const USERNAME_TO_PAYER: Record<string, string> = {
-  alejoamiras: 'alejo',
-  morafreaza: 'mora',
-};
+import { maskBotTokens } from './logger.js';
 
 // Interface for user information extracted from messages
 export interface UserInfo {
   chatId: number;
-  username: string;
+  userId: number;
   payer: string;
   messageText: string;
 }
@@ -24,59 +19,93 @@ export interface ProcessedInput {
   mimeType: string;
 }
 
-/**
- * Extracts user information from a Telegram message
- */
-export function extractUserInfo(msg: TelegramBot.Message): UserInfo {
-  const chatId = msg.chat.id;
-  const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-  const payer = USERNAME_TO_PAYER[username] || username;
-  const messageText = msg.caption || '';
+/** Used when TELEGRAM_ALLOWED_USERS is unset. */
+export const DEFAULT_ALLOWED_USERS = '@alejoamiras:alejo,@morafreaza:mora';
 
+/**
+ * Parses TELEGRAM_ALLOWED_USERS ("<telegram user id>:<payer>" or "@<username>:<payer>", comma
+ * separated) into a sender → payer map. Numeric ids are safer: a username that its owner
+ * gives up can be claimed by someone else.
+ */
+export function parseAllowedUsers(value: string): Map<string, string> {
+  const users = new Map<string, string>();
+  for (const entry of value.split(',').filter((e) => e.trim())) {
+    const [sender, payer] = entry.split(':').map((part) => part.trim());
+    if (!/^(\d+|@\w{5,32})$/.test(sender ?? '') || !payer) {
+      throw new Error(`Invalid TELEGRAM_ALLOWED_USERS entry: "${entry}"`);
+    }
+    users.set(sender.toLowerCase(), payer);
+  }
+  return users;
+}
+
+/** Returns the sender's info, or null when they are not on the allowlist. */
+export function authorize(
+  msg: TelegramBot.Message,
+  allowedUsers: Map<string, string>,
+): UserInfo | null {
+  const from = msg.from;
+  if (!from) return null;
+  // Telegram usernames are case-insensitive.
+  const payer =
+    allowedUsers.get(String(from.id)) ??
+    (from.username ? allowedUsers.get(`@${from.username.toLowerCase()}`) : undefined);
+  if (!payer) return null;
   return {
-    chatId,
-    username,
+    chatId: msg.chat.id,
+    userId: from.id,
     payer,
-    messageText,
+    messageText: msg.caption || msg.text || '',
   };
 }
 
 /**
- * Processes expense data and saves it to Google Sheets
+ * Sends a chat message without throwing: a failed reply must not read as a failed write,
+ * and an unhandled rejection would trigger the process-wide shutdown handler. Error text
+ * is masked because the chat may be a group with people outside the allowlist.
+ */
+export async function notify(
+  bot: TelegramBot,
+  chatId: number,
+  text: string,
+  instanceLogger: Logger,
+): Promise<void> {
+  try {
+    await bot.sendMessage(chatId, maskBotTokens(text));
+  } catch (err) {
+    instanceLogger.error({ err, chatId }, '❌ Failed to send Telegram message');
+  }
+}
+
+export function formatConfirmation(expense: ExtractedExpense, tab: string, row: number): string {
+  const amount = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(
+    expense.amount,
+  );
+  return `✅ Gasto agregado: ${expense.title} · $${amount} · ${expense.category} (${tab}, fila ${row})`;
+}
+
+/**
+ * Saves an extracted expense to Google Sheets and confirms it to the user
  */
 export async function processExpense(
-  llmResult: {
-    title: string;
-    amount: number;
-    category: string;
-    description: string;
-    summary: string;
-  },
+  expense: ExtractedExpense,
   userInfo: UserInfo,
   bot: TelegramBot,
   instanceLogger: Logger,
 ): Promise<void> {
-  try {
-    // Compose row for Google Sheets
-    const row = [
-      llmResult.title || '',
-      'ARS', // Moneda (always ARS)
-      llmResult.amount?.toString() || '',
-      llmResult.amount?.toString() || '', // ARS (repeat for current sheet structure)
-      userInfo.payer,
-      llmResult.category || '🤔',
-      llmResult.description || '',
-    ] as string[];
+  const { tab, row } = await writeExpenseRow(
+    {
+      title: expense.title,
+      amount: expense.amount,
+      payer: userInfo.payer,
+      category: expense.category,
+      description: expense.description,
+    },
+    instanceLogger,
+  );
+  instanceLogger.info({ userId: userInfo.userId, tab, row }, '📊 Expense added to Google Sheets');
 
-    await writeExpenseRow(row, instanceLogger);
-    instanceLogger.info({ username: userInfo.username, row }, '📊 Expense added to Google Sheets');
-
-    // Send success message to user
-    await bot.sendMessage(userInfo.chatId, llmResult.summary);
-  } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to save expense to Google Sheets');
-    throw err;
-  }
+  await notify(bot, userInfo.chatId, formatConfirmation(expense, tab, row), instanceLogger);
 }
 
 /**
@@ -126,77 +155,24 @@ export async function processPdfInput(
 }
 
 /**
- * Common handler for processing any type of receipt input
+ * Extracts an expense from a text message or receipt and saves it
  */
-export async function handleReceiptProcessing(
+export async function handleExpense(
   userInfo: UserInfo,
-  processedInput: ProcessedInput,
+  receipt: ProcessedInput | undefined,
   bot: TelegramBot,
   instanceLogger: Logger,
 ): Promise<void> {
   try {
-    // Extract receipt data using LLM
-    const llmResult = await extractReceiptDataFromImage(
-      processedInput.base64Image,
-      processedInput.mimeType,
-      userInfo.messageText,
-      instanceLogger,
-    );
+    const input: ExpenseInput = { text: userInfo.messageText };
+    if (receipt) input.image = { base64: receipt.base64Image, mimeType: receipt.mimeType };
 
-    instanceLogger.debug({ llmResult }, '🧠 LLM extracted receipt data');
+    const expense = await extractExpense(input, instanceLogger);
+    instanceLogger.debug({ expense }, '🧠 LLM extracted expense data');
 
-    // Process and save expense
-    await processExpense(llmResult, userInfo, bot, instanceLogger);
+    await processExpense(expense, userInfo, bot, instanceLogger);
   } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to process receipt');
-    await bot.sendMessage(userInfo.chatId, `❌ Failed to process receipt: ${err}`);
+    instanceLogger.error({ err }, '❌ Failed to process expense');
+    await notify(bot, userInfo.chatId, `❌ No se pudo agregar el gasto: ${err}`, instanceLogger);
   }
-}
-
-/**
- * Processes text-only expense messages
- */
-export function processTextInput(text: string): string {
-  // Simply return the text, no processing needed for text input
-  return text;
-}
-
-/**
- * Common handler for processing text-only expenses
- */
-export async function handleTextExpenseProcessing(
-  userInfo: UserInfo,
-  text: string,
-  bot: TelegramBot,
-  instanceLogger: Logger,
-): Promise<void> {
-  try {
-    // Extract expense data from text using LLM
-    const llmResult = await extractReceiptDataFromText(text, instanceLogger);
-
-    instanceLogger.debug({ llmResult }, '🧠 LLM extracted expense data from text');
-
-    // Process and save expense
-    await processExpense(llmResult, userInfo, bot, instanceLogger);
-  } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to process text expense');
-    await bot.sendMessage(userInfo.chatId, `❌ Failed to process expense: ${err}`);
-  }
-}
-
-/**
- * Extracts user information from text messages (without caption)
- */
-export function extractUserInfoFromText(msg: TelegramBot.Message): UserInfo {
-  const chatId = msg.chat.id;
-  const username = msg.from?.username || msg.from?.first_name || 'Unknown';
-  const payer = USERNAME_TO_PAYER[username] || username;
-  const messageText = msg.text || '';
-
-  return {
-    chatId,
-    username,
-    payer,
-    messageText,
-  };
 }

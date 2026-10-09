@@ -1,303 +1,128 @@
 import logger from './logger.js';
 import type { Logger } from 'pino';
 
-interface OpenAIResponse {
-  choices: Array<{
-    message: {
-      content: string;
-    };
-  }>;
-}
-interface LLMResult {
+/** Must match the Categoría dropdown in the sheet, which rejects anything else. */
+export const CATEGORIES = ['🏡', '🛒', '🍾', '🐱', '🖼️', '🛫', '🤔'] as const;
+
+const DEFAULT_MODEL = 'gpt-6-luna';
+
+export interface ExtractedExpense {
   title: string;
   amount: number;
-  category: string;
+  category: (typeof CATEGORIES)[number];
   description: string;
-  summary: string;
 }
 
-export async function extractReceiptDataFromImage(
-  base64Image: string,
-  mimeType: string,
-  messageText: string,
-  instanceLogger?: Logger,
-): Promise<LLMResult> {
-  const log = instanceLogger || logger; // Use instanceLogger if provided, fallback to default
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-  if (!OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY is not set in environment variables.');
+export interface ExpenseInput {
+  text: string;
+  image?: { base64: string; mimeType: string };
+}
+
+const EXPENSE_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['title', 'amount', 'category', 'description'],
+  properties: {
+    title: { type: 'string' },
+    amount: { type: 'number' },
+    category: { type: 'string', enum: CATEGORIES },
+    description: { type: 'string' },
+  },
+};
+
+const SYSTEM_PROMPT = `You extract one expense from a message, and from a receipt photo when one is attached, for a couple in Argentina who track shared expenses.
+
+Messages are in Spanish (neutral or Argentinian) and may use local slang:
+- "super" = supermercado, "chino" = supermercado chino, "verdu" = verdulería
+- "morfi" = comida, "birra" = cerveza
+
+Fields:
+- title: if the user's text gives a clear title, use it. Otherwise use the store or company name when identifiable (e.g. "Carrefour", "Freddo"), or a generic label such as "Supermercado", "Restaurante", "Café", "Tienda de ropa", "Transporte", "Salud", "Ocio", "Otros".
+- amount: the final total paid in ARS as a plain number, ignoring discounts, loyalty points and subtotals. Examples: "$1.500" → 1500, "3,200 pesos" → 3200, "2.5k" → 2500, "1k" → 1000, "2m" → 2000. Use 0 if no amount can be found.
+- category: 🏡 home/utilities, 🛒 groceries/supermarket, 🍾 dates/restaurants/bars, 🐱 pet, 🖼️ furniture/art/decoration, 🛫 travel/transport, 🤔 if unsure.
+- description: a brief Spanish summary of what was bought.
+
+On a receipt, ignore QR codes, app promotions and anything that is not the purchase. The user's text, when present, is context for reading the receipt.`;
+
+interface ChatCompletion {
+  choices?: Array<{
+    finish_reason?: string;
+    message?: { content?: string | null; refusal?: string | null };
+  }>;
+  error?: { message?: string };
+}
+
+export function buildRequest(input: ExpenseInput, model: string) {
+  const content: unknown[] = [{ type: 'text', text: `Mensaje del usuario: "${input.text}"` }];
+  if (input.image) {
+    content.push({
+      type: 'image_url',
+      image_url: {
+        url: `data:${input.image.mimeType};base64,${input.image.base64}`,
+        detail: 'high',
+      },
+    });
   }
-  const payload = {
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: [
-          { type: 'text', text: 'You are an expert at extracting expense data from receipts.' },
-        ],
-      },
-      {
-        role: 'user',
-        content: [
-          {
-            type: 'text',
-            text: `📸 Receipt Extraction Prompt
-🎯 Mission
-You are a helpful assistant designed to extract structured data from photos of receipts. You must also consider the additional context provided by the user in text, which may help clarify the receipt.
-
-🌍 Context
-Users are from Argentina. Receipts are in Spanish (neutral or Argentinian). You may encounter local slang such as:
-- "Super" = supermercado (grocery store)
-- "Chino" = supermercado chino (Chinese-owned grocery store)
-- "Verdu" = verdulería (produce store)
-
-🧾 Instructions
-From the receipt image, extract the following fields as a JSON object:
-- title
-- amount
-- category
-- description
-- summary
-
-📌 Field Guidelines:
-- title:
-If the user-provided text gives a clear title, use it. Otherwise, infer it from the receipt image.
-If the store or company name is identifiable, use it (e.g. "Carrefour", "Freddo").
-If not, assign a generic label like: "Supermercado", "Restaurante", "Café", "Tienda de ropa", "Cine", "Hotel", "Educación", "Salud", "Ocio", "Transporte", "Otros".
-
-- amount:
-Total amount paid. Use the final total in Argentine pesos (ARS), ignoring discounts, loyalty points, etc.
-
-- category:
-Choose only one of the following emojis:
-
-🏡 (home)
-🛒 (groceries)
-🍾 (dates)
-🐱 (pet)
-🖼️ (furniture/art)
-🛫 (travel)
-🤔 (uncategorized, if unsure)
-
-- description:
-A brief, human-readable summary of the items or services purchased. Use Spanish (neutral or Argentinian).
-
-- summary:
-One short sentence in Spanish summarizing the purchase. Include the fact that the expense was added, the amount, name and maybe category.
-Example: "Compra de $35.200 en supermercado chino agregada como gasto.", "Compra en Carrefour agregada como gasto.", "Compra de $10.000 en cita agregada como gasto."
-
-🧠 Additional Context
-Use this text provided by the user to help interpret the receipt:
-${messageText}
-
-⚠️ Notes
-Ignore irrelevant information such as QR codes, app promotions, or non-purchase data.
-
-If any field is missing or unclear, do your best to infer or leave it empty with null.
-
-🧾 Example Output
-{
-  "title": "Supermercado Chino",
-  "amount": 8432.50,
-  "category": "🛒",
-  "description": "Compra de alimentos y productos de limpieza",
-  "summary": "Gasto de $15.300 en supermercado chino agregado."
-}
-`.trim(),
-          },
-          {
-            type: 'image_url',
-            image_url: {
-              url: `data:${mimeType};base64,${base64Image}`,
-              detail: 'high',
-            },
-          },
-        ],
-      },
-    ],
-    max_tokens: 1000,
-  };
-
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
-      'Content-Type': 'application/json',
+  return {
+    model,
+    reasoning_effort: 'low',
+    max_completion_tokens: 4000,
+    response_format: {
+      type: 'json_schema',
+      json_schema: { name: 'expense', strict: true, schema: EXPENSE_SCHEMA },
     },
-    body: JSON.stringify(payload),
-  });
-
-  const data = (await response.json()) as unknown;
-  if (
-    typeof data !== 'object' ||
-    data === null ||
-    !('choices' in data) ||
-    !Array.isArray((data as OpenAIResponse).choices) ||
-    !(data as OpenAIResponse).choices[0]?.message?.content
-  ) {
-    log.error({ data }, '🚨 No response from OpenAI Vision API');
-    throw new Error('No response from OpenAI Vision API');
-  }
-
-  // Try to parse the JSON from the response
-  try {
-    const content = (data as OpenAIResponse).choices[0].message.content;
-    const jsonStart = content.indexOf('{');
-    const jsonEnd = content.lastIndexOf('}') + 1;
-    const jsonString = content.slice(jsonStart, jsonEnd);
-    return JSON.parse(jsonString);
-  } catch (err) {
-    log.error(
-      { err, content: (data as OpenAIResponse).choices[0].message.content },
-      '❌ Failed to parse JSON from LLM response',
-    );
-    throw new Error(
-      'Failed to parse JSON from LLM response: ' +
-        (data as OpenAIResponse).choices[0].message.content,
-    );
-  }
+    messages: [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content },
+    ],
+  };
 }
 
-export async function extractReceiptDataFromText(
-  text: string,
+/** Throws a user-facing error when the model refuses, is cut off, or finds no amount. */
+export function parseCompletion(data: ChatCompletion): ExtractedExpense {
+  const choice = data.choices?.[0];
+  if (choice?.message?.refusal) {
+    throw new Error(`El modelo rechazó el pedido: ${choice.message.refusal}`);
+  }
+  if (choice?.finish_reason !== 'stop' || !choice.message?.content) {
+    throw new Error(
+      `Respuesta incompleta del modelo (${choice?.finish_reason ?? 'sin respuesta'})`,
+    );
+  }
+  const expense = JSON.parse(choice.message.content) as ExtractedExpense;
+  if (!Number.isFinite(expense.amount) || expense.amount <= 0) {
+    throw new Error('No encontré el monto del gasto');
+  }
+  // The sheet finds the next free row by an empty title, so a blank one gets overwritten.
+  expense.title = expense.title.trim() || 'Otros';
+  // Strict schemas enforce the enum, but OPENAI_MODEL may name a model that ignores them.
+  if (!CATEGORIES.includes(expense.category)) expense.category = '🤔';
+  return expense;
+}
+
+export async function extractExpense(
+  input: ExpenseInput,
   instanceLogger?: Logger,
-): Promise<LLMResult> {
+): Promise<ExtractedExpense> {
   const log = instanceLogger || logger;
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-  if (!OPENAI_API_KEY) {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) {
     throw new Error('OPENAI_API_KEY is not set in environment variables.');
   }
-
-  const payload = {
-    model: 'gpt-4o',
-    messages: [
-      {
-        role: 'system',
-        content: 'You are an expert at extracting expense data from text messages.',
-      },
-      {
-        role: 'user',
-        content: `📝 Text Expense Extraction Prompt
-🎯 Mission
-You are a helpful assistant designed to extract structured expense data from text messages. Users will send you text descriptions of expenses they want to track.
-
-🌍 Context
-Users are from Argentina. Messages are in Spanish (neutral or Argentinian). Common expense formats include:
-- "Almuerzo 1500 🍕"
-- "Pagué $2500 en el super por compras de la semana"
-- "Uber al aeropuerto: 3200 ARS"
-- "Café con Mora en Starbucks 2800"
-- "Super chino 5430"
-
-You may encounter local slang such as:
-- "Super" = supermercado (grocery store)
-- "Chino" = supermercado chino (Chinese-owned grocery store)
-- "Verdu" = verdulería (produce store)
-- "Morfi" = comida (food)
-- "Birra" = cerveza (beer)
-
-🧾 Instructions
-From the text message, extract the following fields as a JSON object:
-- title: A descriptive title for the expense
-- amount: The numeric amount in ARS (extract number only)
-- category: One of the predefined emoji categories
-- description: A brief summary of what was purchased
-- summary: A short confirmation message in Spanish
-
-📌 Field Guidelines:
-- title:
-Extract or infer a title from the text. If a place/store is mentioned, use it.
-Otherwise use generic labels like: "Supermercado", "Restaurante", "Café", "Transporte", "Otros".
-
-- amount:
-Extract the numeric amount. Remove currency symbols, dots, or commas.
-If amount has decimals, use period (.) as decimal separator.
-Examples: "$1.500" → 1500, "3,200 pesos" → 3200, "2.5k" → 2500
-
-- category:
-Choose only one of the following emojis:
-🏡 (home/utilities)
-🛒 (groceries/supermarket)
-🍾 (dates/restaurants/bars)
-🐱 (pet)
-🖼️ (furniture/art/decoration)
-🛫 (travel/transport)
-🤔 (uncategorized, if unsure)
-
-- description:
-A brief, human-readable summary in Spanish of what the expense was for.
-
-- summary:
-One short sentence in Spanish confirming the expense was added.
-Format: "Gasto de $[amount] en [title] agregado ✅"
-
-🧠 Text to analyze:
-"${text}"
-
-⚠️ Notes
-- If no amount is found, try to infer from context or return 0
-- Be flexible with formats: "1k" = 1000, "1.5k" = 1500, "2m" = 2000
-- If text is ambiguous, make reasonable assumptions based on context
-
-🧾 Example Outputs
-Input: "Almuerzo 1500 🍕"
-{
-  "title": "Almuerzo",
-  "amount": 1500,
-  "category": "🍾",
-  "description": "Almuerzo",
-  "summary": "Gasto de $1.500 en Almuerzo agregado ✅"
-}
-
-Input: "Pagué 2.5k en el chino"
-{
-  "title": "Supermercado Chino",
-  "amount": 2500,
-  "category": "🛒",
-  "description": "Compras en supermercado chino",
-  "summary": "Gasto de $2.500 en Supermercado Chino agregado ✅"
-}`,
-      },
-    ],
-    max_tokens: 500,
-  };
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${OPENAI_API_KEY}`,
+      Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify(payload),
+    body: JSON.stringify(buildRequest(input, process.env.OPENAI_MODEL || DEFAULT_MODEL)),
   });
-
-  const data = (await response.json()) as unknown;
-  if (
-    typeof data !== 'object' ||
-    data === null ||
-    !('choices' in data) ||
-    !Array.isArray((data as OpenAIResponse).choices) ||
-    !(data as OpenAIResponse).choices[0]?.message?.content
-  ) {
-    log.error({ data }, '🚨 No response from OpenAI API');
-    throw new Error('No response from OpenAI API');
+  // A gateway error can come back as HTML; keep the status rather than fail on parsing.
+  const data = (await response.json().catch(() => ({}))) as ChatCompletion;
+  if (!response.ok) {
+    log.error({ status: response.status, error: data.error }, '🚨 OpenAI API error');
+    throw new Error(`OpenAI API error ${response.status}: ${data.error?.message ?? 'unknown'}`);
   }
-
-  // Try to parse the JSON from the response
-  try {
-    const content = (data as OpenAIResponse).choices[0].message.content;
-    const jsonStart = content.indexOf('{');
-    const jsonEnd = content.lastIndexOf('}') + 1;
-    const jsonString = content.slice(jsonStart, jsonEnd);
-    return JSON.parse(jsonString);
-  } catch (err) {
-    log.error(
-      { err, content: (data as OpenAIResponse).choices[0].message.content },
-      '❌ Failed to parse JSON from LLM response',
-    );
-    throw new Error(
-      'Failed to parse JSON from LLM response: ' +
-        (data as OpenAIResponse).choices[0].message.content,
-    );
-  }
+  return parseCompletion(data);
 }
