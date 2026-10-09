@@ -4,6 +4,10 @@ import pino from 'pino';
 // A Telegram bot token: "<bot id>:<secret>".
 const BOT_TOKEN = /\d{5,}:[\w-]{30,}/g;
 
+export function maskBotTokens(text: string): string {
+  return text.replace(BOT_TOKEN, '<bot-token>');
+}
+
 /**
  * Telegram and Google client errors carry their request (bot token in the URL, OAuth bearer
  * in the headers), so only a few fields are logged, and the Telegram client can quote a raw
@@ -12,10 +16,10 @@ const BOT_TOKEN = /\d{5,}:[\w-]{30,}/g;
 export function serializeError(err: Error & { code?: unknown; status?: unknown }) {
   return {
     type: err.name,
-    message: err.message?.replace(BOT_TOKEN, '<bot-token>'),
+    message: err.message && maskBotTokens(err.message),
     code: err.code,
     status: err.status,
-    stack: err.stack?.replace(BOT_TOKEN, '<bot-token>'),
+    stack: err.stack && maskBotTokens(err.stack),
   };
 }
 

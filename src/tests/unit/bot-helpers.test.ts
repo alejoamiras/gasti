@@ -1,6 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import type { Message } from 'node-telegram-bot-api';
-import { authorize, parseAllowedUsers, processExpense } from '../../library/bot-helpers.js';
+import { authorize, notify, parseAllowedUsers, processExpense } from '../../library/bot-helpers.js';
 
 // Mock dependencies
 jest.mock('../../library/sheets.js', () => ({
@@ -68,6 +68,18 @@ describe('Bot Helpers', () => {
       } as unknown as Message;
       expect(authorize(msg, allowed)).toBeNull();
       expect(authorize({ chat: { id: 9 }, text: 'x' } as Message, allowed)).toBeNull();
+    });
+  });
+
+  describe('notify', () => {
+    it('masks bot tokens, since the chat may include people outside the allowlist', async () => {
+      await notify(
+        mockBot as never,
+        123,
+        '❌ EPARSE /bot123456789:AAHk3-fake_token_value_for_tests_0123/getFile',
+        mockLogger as never,
+      );
+      expect(mockBot.sendMessage).toHaveBeenCalledWith(123, '❌ EPARSE /bot<bot-token>/getFile');
     });
   });
 

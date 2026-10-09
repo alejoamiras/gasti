@@ -3,6 +3,7 @@ import type { Logger } from 'pino';
 import { writeExpenseRow } from './sheets.js';
 import { extractExpense, type ExpenseInput, type ExtractedExpense } from './llm.js';
 import { convertPdfToImages } from './pdf.js';
+import { maskBotTokens } from './logger.js';
 
 // Interface for user information extracted from messages
 export interface UserInfo {
@@ -52,7 +53,8 @@ export function authorize(
 
 /**
  * Sends a chat message without throwing: a failed reply must not read as a failed write,
- * and an unhandled rejection would trigger the process-wide shutdown handler.
+ * and an unhandled rejection would trigger the process-wide shutdown handler. Error text
+ * is masked because the chat may be a group with people outside the allowlist.
  */
 export async function notify(
   bot: TelegramBot,
@@ -61,7 +63,7 @@ export async function notify(
   instanceLogger: Logger,
 ): Promise<void> {
   try {
-    await bot.sendMessage(chatId, text);
+    await bot.sendMessage(chatId, maskBotTokens(text));
   } catch (err) {
     instanceLogger.error({ err, chatId }, '❌ Failed to send Telegram message');
   }
