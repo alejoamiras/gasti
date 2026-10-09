@@ -50,8 +50,5 @@
     "node-telegram-bot-api": "^0.61.0",
     "pdf-to-img": "^4.5.0",
     "pino": "^9.7.0"
-  },
-  "engines": {
-    "node": ">=24"
   }
 }

@@ -75,7 +75,8 @@ const gracefulShutdown = async (signal: string) => {
     }
 
     instanceLogger.info('✅ Graceful shutdown completed - exiting cleanly');
-    process.exit(0);
+    // A crash must exit non-zero, or Railway's default on-failure policy won't restart the bot.
+    process.exit(signal.startsWith('SIG') ? 0 : 1);
   } catch (error) {
     instanceLogger.error('❌ Error during graceful shutdown:', error);
     // Force exit even if there's an error to avoid hanging

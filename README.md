@@ -115,4 +115,4 @@ This bot is designed to run as a persistent process (not serverless). Railway is
 1. [Create a Railway account](https://railway.app/)
 2. Link your GitHub repo or deploy manually
 3. Set environment variables in the Railway dashboard (see .env.template)
-4. Deploy! Railway builds with `railpack.json` (Node 24) and runs `node dist/bot.js`.
+4. Deploy! Railpack detects Yarn from `yarn.lock`, takes the Node version from `.node-version`, runs `yarn build` and starts the bot with `yarn start`. The bot exits non-zero after a crash, so Railway's default on-failure restart policy brings it back.
