@@ -188,11 +188,16 @@ export function writeExpenseRow(expense: ExpenseRow, instanceLogger?: Logger): P
         throw new Error(`No existe la pestaña "${tab}" en la planilla`);
       }
 
-      const res = await sheets.spreadsheets.values.get({
+      const res = await sheets.spreadsheets.values.batchGet({
         spreadsheetId,
-        range: `'${tab}'!B${FIRST_DATA_ROW}:B`,
+        ranges: [`'${tab}'!B${FIRST_DATA_ROW}:B`, `'${tab}'!E${FIRST_DATA_ROW}`],
+        valueRenderOption: 'FORMULA',
       });
-      const row = firstEmptyRow(res.data.values || []);
+      const [titles, arsSource] = res.data.valueRanges || [];
+      if (!String(arsSource?.values?.[0]?.[0] ?? '').startsWith('=')) {
+        throw new Error(`E${FIRST_DATA_ROW} de "${tab}" no tiene la fórmula de ARS para copiar`);
+      }
+      const row = firstEmptyRow(titles?.values || []);
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,

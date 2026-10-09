@@ -1,5 +1,56 @@
-import { describe, it, expect } from '@jest/globals';
-import { buildRowRequests, firstEmptyRow, monthTabName } from './sheets.js';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import type { sheets_v4 } from 'googleapis';
+import { buildRowRequests, firstEmptyRow, monthTabName, writeExpenseRow } from './sheets.js';
+
+// In-memory month tab; the factory only reads it inside functions called after setup.
+const mockSheet = {
+  tabs: [] as string[],
+  e3: '',
+  titles: [] as string[][],
+  writes: 0,
+};
+
+jest.mock('googleapis', () => ({
+  google: {
+    auth: { GoogleAuth: jest.fn() },
+    sheets: () => ({
+      spreadsheets: {
+        get: async () => ({
+          data: {
+            sheets: mockSheet.tabs.map((title, sheetId) => ({ properties: { title, sheetId } })),
+          },
+        }),
+        values: {
+          batchGet: async () => {
+            const titles = mockSheet.titles.map((cells) => [...cells]);
+            // Yield so that unserialized writes would interleave and pick the same row.
+            await new Promise((resolve) => setTimeout(resolve, 5));
+            return { data: { valueRanges: [{ values: titles }, { values: [[mockSheet.e3]] }] } };
+          },
+        },
+        batchUpdate: async ({
+          requestBody,
+        }: {
+          requestBody: sheets_v4.Schema$BatchUpdateSpreadsheetRequest;
+        }) => {
+          const cells = requestBody.requests?.[0].updateCells;
+          const title = cells?.rows?.[0].values?.[0].userEnteredValue?.stringValue ?? '';
+          if (title === 'boom') throw new Error('rejected');
+          mockSheet.titles[(cells?.range?.startRowIndex ?? 0) - 2] = [title];
+          mockSheet.writes += 1;
+        },
+      },
+    }),
+  },
+}));
+
+const expense = (title: string) => ({
+  title,
+  amount: 100,
+  payer: 'alejo',
+  category: '🛒',
+  description: '',
+});
 
 describe('monthTabName', () => {
   it('names the tab in Argentina time, with the year', () => {
@@ -57,5 +108,44 @@ describe('buildRowRequests', () => {
       { userEnteredValue: { stringValue: 'variable' } },
       { userEnteredValue: { stringValue: '=HYPERLINK("x")' } },
     ]);
+  });
+});
+
+describe('writeExpenseRow', () => {
+  beforeEach(() => {
+    process.env.BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS = Buffer.from('{}').toString('base64');
+    process.env.GOOGLE_SHEETS_SPREADSHEET_ID = 'sheet';
+    Object.assign(mockSheet, {
+      tabs: [monthTabName()],
+      e3: '=IF(C3="USD";MULTIPLY($D3;$L$18);$D3)',
+      titles: [['Expensas']],
+      writes: 0,
+    });
+  });
+
+  it('gives concurrent writes consecutive rows and keeps going after a failure', async () => {
+    const results = await Promise.allSettled([
+      writeExpenseRow(expense('A')),
+      writeExpenseRow(expense('boom')),
+      writeExpenseRow(expense('C')),
+    ]);
+
+    expect(results.map((r) => (r.status === 'fulfilled' ? r.value.row : 'failed'))).toEqual([
+      4,
+      'failed',
+      5,
+    ]);
+    expect(mockSheet.titles).toEqual([['Expensas'], ['A'], ['C']]);
+  });
+
+  it('writes nothing when the month tab or the ARS formula is missing', async () => {
+    mockSheet.tabs = ['template'];
+    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('No existe la pestaña');
+
+    mockSheet.tabs = [monthTabName()];
+    mockSheet.e3 = '';
+    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('fórmula de ARS');
+
+    expect(mockSheet.writes).toBe(0);
   });
 });

@@ -103,6 +103,23 @@ describe('Bot Helpers', () => {
       );
     });
 
+    it('does not report a failed confirmation as a failed write', async () => {
+      jest.mocked(writeExpenseRow).mockResolvedValueOnce({ tab: 'octubre 26', row: 13 });
+      mockBot.sendMessage.mockImplementationOnce(async () => {
+        throw new Error('telegram down');
+      });
+
+      await expect(
+        processExpense(
+          { title: 'Café', amount: 2800, category: '🍾', description: 'Café' },
+          userInfo,
+          mockBot as never,
+          mockLogger as never,
+        ),
+      ).resolves.toBeUndefined();
+      expect(mockLogger.error).toHaveBeenCalled();
+    });
+
     it('propagates sheet errors', async () => {
       jest.mocked(writeExpenseRow).mockRejectedValueOnce(new Error('Database error'));
 

@@ -28,9 +28,11 @@ describe('parseCompletion', () => {
     expect(parseCompletion(completion(JSON.stringify(expense)))).toEqual(expense);
   });
 
-  it('falls back to 🤔 for a category the sheet would not accept', () => {
-    const expense = { title: 'X', amount: 1, category: '❓', description: 'X' };
-    expect(parseCompletion(completion(JSON.stringify(expense))).category).toBe('🤔');
+  it('repairs values the sheet would mishandle', () => {
+    const expense = { title: '  ', amount: 1, category: '❓', description: 'X' };
+    const parsed = parseCompletion(completion(JSON.stringify(expense)));
+    expect(parsed.category).toBe('🤔');
+    expect(parsed.title).toBe('Otros');
   });
 
   it('rejects refusals, truncated output and missing amounts', () => {

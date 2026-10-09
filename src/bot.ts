@@ -9,6 +9,7 @@ import {
   processPhotoInput,
   processPdfInput,
   handleExpense,
+  notify,
   type UserInfo,
 } from './library/bot-helpers.js';
 import { loadSheetsConfig } from './library/sheets.js';
@@ -127,9 +128,11 @@ const setupBotHandlers = () => {
       { userId: userInfo.userId, messageText: userInfo.messageText },
       '📸 Received a receipt photo',
     );
-    bot.sendMessage(
+    notify(
+      bot,
       userInfo.chatId,
       `💭 Recibímos la foto del recibo, y empezamos a procesarlo...`,
+      instanceLogger,
     );
 
     try {
@@ -141,7 +144,7 @@ const setupBotHandlers = () => {
       await handleExpense(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process receipt');
-      bot.sendMessage(userInfo.chatId, `❌ Failed to process receipt: ${err}`);
+      notify(bot, userInfo.chatId, `❌ Failed to process receipt: ${err}`, instanceLogger);
     }
   });
 
@@ -151,7 +154,7 @@ const setupBotHandlers = () => {
 
     // Check if it's a PDF
     if (!msg.document?.mime_type?.includes('pdf')) {
-      bot.sendMessage(userInfo.chatId, '❌ Please send a PDF file.');
+      notify(bot, userInfo.chatId, '❌ Please send a PDF file.', instanceLogger);
       return;
     }
 
@@ -159,14 +162,19 @@ const setupBotHandlers = () => {
       { userId: userInfo.userId, messageText: userInfo.messageText },
       '📄 Received a PDF receipt',
     );
-    bot.sendMessage(userInfo.chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
+    notify(
+      bot,
+      userInfo.chatId,
+      `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`,
+      instanceLogger,
+    );
 
     try {
       const processedInput = await processPdfInput(msg.document, bot, token, instanceLogger);
       await handleExpense(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process PDF receipt');
-      bot.sendMessage(userInfo.chatId, `❌ Failed to process PDF receipt: ${err}`);
+      notify(bot, userInfo.chatId, `❌ Failed to process PDF receipt: ${err}`, instanceLogger);
     }
   });
 
@@ -183,7 +191,7 @@ const setupBotHandlers = () => {
       { userId: userInfo.userId, text: userInfo.messageText },
       '💬 Received a text expense',
     );
-    bot.sendMessage(userInfo.chatId, `💭 Procesando tu gasto...`);
+    notify(bot, userInfo.chatId, `💭 Procesando tu gasto...`, instanceLogger);
 
     await handleExpense(userInfo, undefined, bot, instanceLogger);
   });

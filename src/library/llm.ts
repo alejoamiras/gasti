@@ -90,9 +90,11 @@ export function parseCompletion(data: ChatCompletion): ExtractedExpense {
     );
   }
   const expense = JSON.parse(choice.message.content) as ExtractedExpense;
-  if (!(expense.amount > 0)) {
+  if (!Number.isFinite(expense.amount) || expense.amount <= 0) {
     throw new Error('No encontré el monto del gasto');
   }
+  // The sheet finds the next free row by an empty title, so a blank one gets overwritten.
+  expense.title = expense.title.trim() || 'Otros';
   // Strict schemas enforce the enum, but OPENAI_MODEL may name a model that ignores them.
   if (!CATEGORIES.includes(expense.category)) expense.category = '🤔';
   return expense;
@@ -116,7 +118,8 @@ export async function extractExpense(
     },
     body: JSON.stringify(buildRequest(input, process.env.OPENAI_MODEL || DEFAULT_MODEL)),
   });
-  const data = (await response.json()) as ChatCompletion;
+  // A gateway error can come back as HTML; keep the status rather than fail on parsing.
+  const data = (await response.json().catch(() => ({}))) as ChatCompletion;
   if (!response.ok) {
     log.error({ status: response.status, error: data.error }, '🚨 OpenAI API error');
     throw new Error(`OpenAI API error ${response.status}: ${data.error?.message ?? 'unknown'}`);

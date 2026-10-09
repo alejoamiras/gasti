@@ -50,6 +50,23 @@ export function authorize(
   };
 }
 
+/**
+ * Sends a chat message without throwing: a failed reply must not read as a failed write,
+ * and an unhandled rejection would trigger the process-wide shutdown handler.
+ */
+export async function notify(
+  bot: TelegramBot,
+  chatId: number,
+  text: string,
+  instanceLogger: Logger,
+): Promise<void> {
+  try {
+    await bot.sendMessage(chatId, text);
+  } catch (err) {
+    instanceLogger.error({ err, chatId }, '❌ Failed to send Telegram message');
+  }
+}
+
 export function formatConfirmation(expense: ExtractedExpense, tab: string, row: number): string {
   const amount = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(
     expense.amount,
@@ -66,24 +83,19 @@ export async function processExpense(
   bot: TelegramBot,
   instanceLogger: Logger,
 ): Promise<void> {
-  try {
-    const { tab, row } = await writeExpenseRow(
-      {
-        title: expense.title,
-        amount: expense.amount,
-        payer: userInfo.payer,
-        category: expense.category,
-        description: expense.description,
-      },
-      instanceLogger,
-    );
-    instanceLogger.info({ userId: userInfo.userId, tab, row }, '📊 Expense added to Google Sheets');
+  const { tab, row } = await writeExpenseRow(
+    {
+      title: expense.title,
+      amount: expense.amount,
+      payer: userInfo.payer,
+      category: expense.category,
+      description: expense.description,
+    },
+    instanceLogger,
+  );
+  instanceLogger.info({ userId: userInfo.userId, tab, row }, '📊 Expense added to Google Sheets');
 
-    await bot.sendMessage(userInfo.chatId, formatConfirmation(expense, tab, row));
-  } catch (err) {
-    instanceLogger.error({ err }, '❌ Failed to save expense to Google Sheets');
-    throw err;
-  }
+  await notify(bot, userInfo.chatId, formatConfirmation(expense, tab, row), instanceLogger);
 }
 
 /**
@@ -151,6 +163,6 @@ export async function handleExpense(
     await processExpense(expense, userInfo, bot, instanceLogger);
   } catch (err) {
     instanceLogger.error({ err }, '❌ Failed to process expense');
-    await bot.sendMessage(userInfo.chatId, `❌ No se pudo agregar el gasto: ${err}`);
+    await notify(bot, userInfo.chatId, `❌ No se pudo agregar el gasto: ${err}`, instanceLogger);
   }
 }
