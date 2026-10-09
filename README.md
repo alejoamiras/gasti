@@ -87,7 +87,7 @@ Run all tests:
 yarn test
 ```
 
-The real OpenAI test in `src/library/llm.test.ts` is skipped unless `OPENAI_API_KEY` is set. Run it as a keyed run with `test.env.example` as the template: `env-exec request --template test.env.example --slug llm -- bun test src/library/llm.test.ts` (the keyed-run PATH has Bun, not Yarn; `bun test` runs this file as-is).
+The real OpenAI test in `src/library/llm.test.ts` is skipped unless `OPENAI_API_KEY` is set. `test.env.example` points at the key in 1Password, so run it with `op run --env-file=test.env.example -- bun test src/library/llm.test.ts` on a machine with the 1Password CLI, or as a keyed run from a remote host (`env-exec request --template test.env.example --slug llm -- bun test src/library/llm.test.ts`).
 
 ### CI/Memory-Constrained Testing
 
