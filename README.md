@@ -62,7 +62,7 @@ The bot will intelligently parse the text, categorize the expense, and log it.
 Create a `.env` file in the project root with the following variables:
 
 - `TELEGRAM_BOT_TOKEN`: Your Telegram bot token
-- `TELEGRAM_ALLOWED_USERS`: Who may use the bot, as `<telegram user id>:<payer>` pairs separated by commas (e.g. `123456:alejo,789012:mora`). The payer must match the sheet's **Paga** dropdown. Messages from anyone else are ignored and logged with their user id.
+- `TELEGRAM_ALLOWED_USERS`: (optional) Who may use the bot, as comma-separated `<telegram user id>:<payer>` or `@<username>:<payer>` pairs (e.g. `123456:alejo,@morafreaza:mora`). Defaults to `@alejoamiras:alejo,@morafreaza:mora`. Numeric ids are safer, since a username its owner gives up can be claimed by someone else. The payer must match the sheet's **Paga** dropdown. Messages from anyone else are ignored and logged with their user id.
 - `BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS`: Google service account credentials, base64-encoded JSON string (see below)
 - `GOOGLE_SHEETS_SPREADSHEET_ID`: The ID of your Google Sheets document
 - `OPENAI_API_KEY`: Your OpenAI API key

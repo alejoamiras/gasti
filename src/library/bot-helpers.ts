@@ -19,18 +19,22 @@ export interface ProcessedInput {
   mimeType: string;
 }
 
+/** Used when TELEGRAM_ALLOWED_USERS is unset. */
+export const DEFAULT_ALLOWED_USERS = '@alejoamiras:alejo,@morafreaza:mora';
+
 /**
- * Parses TELEGRAM_ALLOWED_USERS ("<telegram user id>:<payer>,...") into a user id → payer map.
- * Keyed by numeric id because usernames can be changed or claimed by someone else.
+ * Parses TELEGRAM_ALLOWED_USERS ("<telegram user id>:<payer>" or "@<username>:<payer>", comma
+ * separated) into a sender → payer map. Numeric ids are safer: a username that its owner
+ * gives up can be claimed by someone else.
  */
-export function parseAllowedUsers(value: string): Map<number, string> {
-  const users = new Map<number, string>();
+export function parseAllowedUsers(value: string): Map<string, string> {
+  const users = new Map<string, string>();
   for (const entry of value.split(',').filter((e) => e.trim())) {
-    const [id, payer] = entry.split(':').map((part) => part.trim());
-    if (!/^\d+$/.test(id ?? '') || !payer) {
+    const [sender, payer] = entry.split(':').map((part) => part.trim());
+    if (!/^(\d+|@\w{5,32})$/.test(sender ?? '') || !payer) {
       throw new Error(`Invalid TELEGRAM_ALLOWED_USERS entry: "${entry}"`);
     }
-    users.set(Number(id), payer);
+    users.set(sender.toLowerCase(), payer);
   }
   return users;
 }
@@ -38,14 +42,18 @@ export function parseAllowedUsers(value: string): Map<number, string> {
 /** Returns the sender's info, or null when they are not on the allowlist. */
 export function authorize(
   msg: TelegramBot.Message,
-  allowedUsers: Map<number, string>,
+  allowedUsers: Map<string, string>,
 ): UserInfo | null {
-  const userId = msg.from?.id;
-  const payer = userId === undefined ? undefined : allowedUsers.get(userId);
-  if (userId === undefined || !payer) return null;
+  const from = msg.from;
+  if (!from) return null;
+  // Telegram usernames are case-insensitive.
+  const payer =
+    allowedUsers.get(String(from.id)) ??
+    (from.username ? allowedUsers.get(`@${from.username.toLowerCase()}`) : undefined);
+  if (!payer) return null;
   return {
     chatId: msg.chat.id,
-    userId,
+    userId: from.id,
     payer,
     messageText: msg.caption || msg.text || '',
   };

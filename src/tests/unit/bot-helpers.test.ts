@@ -33,11 +33,11 @@ describe('Bot Helpers', () => {
   });
 
   describe('parseAllowedUsers', () => {
-    it('maps telegram user ids to payers', () => {
-      expect(parseAllowedUsers(' 111:alejo, 222:mora ,')).toEqual(
+    it('maps telegram user ids and usernames to payers', () => {
+      expect(parseAllowedUsers(' 111:alejo, @MoraFreaza:mora ,')).toEqual(
         new Map([
-          [111, 'alejo'],
-          [222, 'mora'],
+          ['111', 'alejo'],
+          ['@morafreaza', 'mora'],
         ]),
       );
       expect(parseAllowedUsers('')).toEqual(new Map());
@@ -50,23 +50,27 @@ describe('Bot Helpers', () => {
   });
 
   describe('authorize', () => {
-    const allowed = new Map([[111, 'alejo']]);
+    const allowed = parseAllowedUsers('111:alejo,@morafreaza:mora');
 
-    it('accepts allowlisted senders, taking the caption or the text', () => {
+    it('accepts allowlisted ids and usernames, taking the caption or the text', () => {
       const photo = { chat: { id: 123 }, from: { id: 111 }, caption: 'Café' } as Message;
-      const text = { chat: { id: 123 }, from: { id: 111 }, text: 'Café 2800' } as Message;
+      const text = {
+        chat: { id: 123 },
+        from: { id: 222, username: 'MoraFreaza' },
+        text: 'Café 2800',
+      } as unknown as Message;
 
       expect(authorize(photo, allowed)).toEqual({ ...userInfo, messageText: 'Café' });
-      expect(authorize(text, allowed)?.messageText).toBe('Café 2800');
+      expect(authorize(text, allowed)).toMatchObject({ payer: 'mora', messageText: 'Café 2800' });
     });
 
-    it('rejects anyone else, whatever their username', () => {
-      const msg = {
+    it('rejects anyone else', () => {
+      const stranger = {
         chat: { id: 9 },
-        from: { id: 999, username: 'alejoamiras' },
+        from: { id: 999, username: 'someone' },
         text: 'x',
       } as unknown as Message;
-      expect(authorize(msg, allowed)).toBeNull();
+      expect(authorize(stranger, allowed)).toBeNull();
       expect(authorize({ chat: { id: 9 }, text: 'x' } as Message, allowed)).toBeNull();
     });
   });

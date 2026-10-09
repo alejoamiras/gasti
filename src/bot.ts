@@ -5,6 +5,7 @@ import { randomBytes } from 'crypto';
 import type { Logger } from 'pino';
 import {
   authorize,
+  DEFAULT_ALLOWED_USERS,
   parseAllowedUsers,
   processPhotoInput,
   processPdfInput,
@@ -26,9 +27,9 @@ if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is not set in environment variables.');
 }
 
-const allowedUsers = parseAllowedUsers(process.env.TELEGRAM_ALLOWED_USERS || '');
+const allowedUsers = parseAllowedUsers(process.env.TELEGRAM_ALLOWED_USERS || DEFAULT_ALLOWED_USERS);
 if (allowedUsers.size === 0) {
-  throw new Error('TELEGRAM_ALLOWED_USERS is not set in environment variables.');
+  throw new Error('TELEGRAM_ALLOWED_USERS lists no users.');
 }
 loadSheetsConfig();
 
@@ -114,7 +115,7 @@ const setupBotHandlers = () => {
     if (!userInfo) {
       instanceLogger.warn(
         { userId: msg.from?.id, username: msg.from?.username },
-        '🚫 Ignoring message from a user not in TELEGRAM_ALLOWED_USERS',
+        '🚫 Ignoring message from a user not on the allowlist',
       );
     }
     return userInfo;
