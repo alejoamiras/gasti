@@ -108,12 +108,6 @@ This script includes memory optimizations:
 
 The bot writes to the tab named after the current month in Argentina time plus the two-digit year, e.g. `octubre 26`, and fails with a clear message if that tab doesn't exist. Rows start at row 3, with columns B `Gasto`, C `Moneda`, D `Monto`, E `ARS` (copied from E3's formula), F `Paga`, G `Categoría`, H `Tipo` (always `variable`) and I `Comments`.
 
-## Next Steps
-
-- Set up CI (GitHub Actions)
-- Scaffold Telegram bot
-- Integrate Google Sheets and LLM OCR
-
 ## Deployment (Railway)
 
 This bot is designed to run as a persistent process (not serverless). Railway is recommended for easy Node.js bot deployment.
@@ -121,4 +115,4 @@ This bot is designed to run as a persistent process (not serverless). Railway is
 1. [Create a Railway account](https://railway.app/)
 2. Link your GitHub repo or deploy manually
 3. Set environment variables in the Railway dashboard (see .env.template)
-4. Deploy! Railway will use the Procfile and start the bot with `yarn start`.
+4. Deploy! Railpack detects Yarn from `yarn.lock`, takes the Node version from `.node-version`, runs `yarn build` and starts the bot with `yarn start`. The bot exits non-zero after a crash, so Railway's default on-failure restart policy brings it back.

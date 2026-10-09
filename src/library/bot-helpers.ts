@@ -108,6 +108,16 @@ export async function processExpense(
   await notify(bot, userInfo.chatId, formatConfirmation(expense, tab, row), instanceLogger);
 }
 
+/** Downloads a Telegram file; the URL embeds the bot token, so a failure reports only the status. */
+async function downloadTelegramFile(fileId: string, bot: TelegramBot, token: string) {
+  const file = await bot.getFile(fileId);
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  if (!response.ok) {
+    throw new Error(`No se pudo descargar el archivo de Telegram (${response.status})`);
+  }
+  return Buffer.from(await response.arrayBuffer());
+}
+
 /**
  * Processes photo input from Telegram and returns standardized data
  */
@@ -116,11 +126,7 @@ export async function processPhotoInput(
   bot: TelegramBot,
   token: string,
 ): Promise<ProcessedInput> {
-  const file = await bot.getFile(photo.file_id);
-  const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-  const response = await fetch(fileUrl);
-  const buffer = Buffer.from(await response.arrayBuffer());
-
+  const buffer = await downloadTelegramFile(photo.file_id, bot, token);
   return {
     base64Image: buffer.toString('base64'),
     mimeType: 'image/jpeg', // Telegram always sends JPEGs
@@ -136,15 +142,7 @@ export async function processPdfInput(
   token: string,
   instanceLogger: Logger,
 ): Promise<ProcessedInput> {
-  const file = await bot.getFile(document.file_id);
-  const fileUrl = `https://api.telegram.org/file/bot${token}/${file.file_path}`;
-  const response = await fetch(fileUrl);
-  const arrayBuffer = await response.arrayBuffer();
-  const buffer = Buffer.from(arrayBuffer);
-
-  instanceLogger.debug('📦 Buffer received');
-
-  // Convert PDF to image
+  const buffer = await downloadTelegramFile(document.file_id, bot, token);
   const image = await convertPdfToImages(buffer, instanceLogger);
   instanceLogger.debug('🖼️ Converted PDF to image');
 

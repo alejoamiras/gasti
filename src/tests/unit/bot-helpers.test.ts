@@ -1,6 +1,12 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import type { Message } from 'node-telegram-bot-api';
-import { authorize, notify, parseAllowedUsers, processExpense } from '../../library/bot-helpers.js';
+import {
+  authorize,
+  notify,
+  parseAllowedUsers,
+  processExpense,
+  processPhotoInput,
+} from '../../library/bot-helpers.js';
 
 // Mock dependencies
 jest.mock('../../library/sheets.js', () => ({
@@ -148,6 +154,17 @@ describe('Bot Helpers', () => {
         ),
       ).rejects.toThrow('Database error');
       expect(mockBot.sendMessage).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('processPhotoInput', () => {
+    it('fails without leaking the bot token when the download fails', async () => {
+      const bot = { getFile: jest.fn(async () => ({ file_path: 'photos/1.jpg' })) };
+      jest.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('gone', { status: 404 }));
+
+      const failure = processPhotoInput({ file_id: 'f' } as never, bot as never, 'SECRET-TOKEN');
+      await expect(failure).rejects.toThrow('(404)');
+      await expect(failure).rejects.not.toThrow('SECRET-TOKEN');
     });
   });
 });
