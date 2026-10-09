@@ -87,7 +87,7 @@ Run all tests:
 yarn test
 ```
 
-The real OpenAI test in `src/library/llm.test.ts` is skipped unless `OPENAI_API_KEY` is set. Run it as a keyed run with `test.env.example` as the template: `env-exec request --template test.env.example --slug llm -- yarn jest src/library/llm.test.ts`.
+The real OpenAI test in `src/library/llm.test.ts` is skipped unless `OPENAI_API_KEY` is set. Run it as a keyed run with `test.env.example` as the template: `env-exec request --template test.env.example --slug llm -- bun test src/library/llm.test.ts` (the keyed-run PATH has Bun, not Yarn; `bun test` runs this file as-is).
 
 ### CI/Memory-Constrained Testing
 
