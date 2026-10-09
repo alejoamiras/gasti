@@ -3,7 +3,7 @@
   "steps": [
     {
       "name": "setup",
-      "image": "node:18-alpine",
+      "image": "node:24-alpine",
       "commands": ["npm install -g yarn ts-node typescript"]
     },
     {
@@ -12,7 +12,7 @@
     }
   ],
   "deploy": {
-    "base": "node:18-alpine",
+    "base": "node:24-alpine",
     "startCommand": "exec node dist/bot.js",
     "inputs": ["setup", "install"],
     "restartPolicy": "always"

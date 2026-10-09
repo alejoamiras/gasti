@@ -96,12 +96,6 @@ describe('Bot Initialization', () => {
     jest.clearAllMocks();
   });
 
-  it('should compile without errors', async () => {
-    // This test is more of a reminder - actual compilation is tested by running npm run build
-    // If this test is running, it means the TypeScript has already compiled successfully
-    expect(true).toBe(true);
-  });
-
   it('should initialize bot without throwing errors', async () => {
     // Import the bot module - this will test initialization
     const importBot = async () => {
@@ -135,12 +129,6 @@ describe('Bot Initialization', () => {
     expect(mockBot.on).toHaveBeenCalledWith('photo', expect.any(Function));
     expect(mockBot.on).toHaveBeenCalledWith('document', expect.any(Function));
     expect(mockBot.on).toHaveBeenCalledWith('text', expect.any(Function));
-  });
-
-  it.skip('should handle missing environment variables gracefully', async () => {
-    // This test is skipped because the bot checks the token at module load time,
-    // making it difficult to test in Jest without complex module cache manipulation.
-    // The check is tested manually and works correctly in production.
   });
 });
 
