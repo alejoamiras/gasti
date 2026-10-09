@@ -66,6 +66,7 @@ describe('firstEmptyRow', () => {
     expect(firstEmptyRow([])).toBe(3);
     expect(firstEmptyRow([['Expensas'], [], ['Verdu']])).toBe(4);
     expect(firstEmptyRow([['Expensas'], ['Personal']])).toBe(5);
+    expect(firstEmptyRow([[0], [false], ['']])).toBe(5);
   });
 });
 

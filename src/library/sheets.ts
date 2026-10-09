@@ -85,8 +85,8 @@ export function monthTabName(date: Date = new Date()): string {
 }
 
 /** 1-based row of the first empty Gasto cell, given column B read from FIRST_DATA_ROW down. */
-export function firstEmptyRow(columnB: string[][]): number {
-  const index = columnB.findIndex((cells) => !cells[0]);
+export function firstEmptyRow(columnB: unknown[][]): number {
+  const index = columnB.findIndex((cells) => cells[0] === undefined || cells[0] === '');
   return FIRST_DATA_ROW + (index === -1 ? columnB.length : index);
 }
 

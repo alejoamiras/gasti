@@ -1,17 +1,21 @@
 import pino from 'pino';
 
 // Set log level from environment variable, default to 'info'
+// A Telegram bot token: "<bot id>:<secret>".
+const BOT_TOKEN = /\d{5,}:[\w-]{30,}/g;
+
 /**
  * Telegram and Google client errors carry their request (bot token in the URL, OAuth bearer
- * in the headers), so only fields that cannot hold either are logged.
+ * in the headers), so only a few fields are logged, and the Telegram client can quote a raw
+ * response body in its message, so bot tokens are masked there too.
  */
 export function serializeError(err: Error & { code?: unknown; status?: unknown }) {
   return {
     type: err.name,
-    message: err.message,
+    message: err.message?.replace(BOT_TOKEN, '<bot-token>'),
     code: err.code,
     status: err.status,
-    stack: err.stack,
+    stack: err.stack?.replace(BOT_TOKEN, '<bot-token>'),
   };
 }
 
