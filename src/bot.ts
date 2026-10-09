@@ -4,13 +4,14 @@ import logger from './library/logger.js';
 import { randomBytes } from 'crypto';
 import type { Logger } from 'pino';
 import {
-  extractUserInfo,
-  extractUserInfoFromText,
+  authorize,
+  parseAllowedUsers,
   processPhotoInput,
   processPdfInput,
-  handleReceiptProcessing,
-  handleTextExpenseProcessing,
+  handleExpense,
+  type UserInfo,
 } from './library/bot-helpers.js';
+import { loadSheetsConfig } from './library/sheets.js';
 
 // Generate unique instance ID for tracking
 const INSTANCE_ID = `${Date.now()}-${randomBytes(4).toString('hex')}`;
@@ -23,6 +24,12 @@ const token = process.env.TELEGRAM_BOT_TOKEN || '';
 if (!token) {
   throw new Error('TELEGRAM_BOT_TOKEN is not set in environment variables.');
 }
+
+const allowedUsers = parseAllowedUsers(process.env.TELEGRAM_ALLOWED_USERS || '');
+if (allowedUsers.size === 0) {
+  throw new Error('TELEGRAM_ALLOWED_USERS is not set in environment variables.');
+}
+loadSheetsConfig();
 
 instanceLogger.info(`🚀 Bot instance starting with ID: ${INSTANCE_ID}`);
 instanceLogger.info(`🐳 Process PID: ${process.pid}, Platform: ${process.platform}`);
@@ -96,17 +103,28 @@ const setupBotHandlers = () => {
     instanceLogger.error('🚨 WEBHOOK ERROR:', error);
   });
 
-  bot.on('photo', async (msg: TelegramBot.Message) => {
-    // Prevent processing during shutdown
+  // Returns the sender's info when the message should be processed, null otherwise.
+  const acceptMessage = (msg: TelegramBot.Message): UserInfo | null => {
     if (isShuttingDown) {
       instanceLogger.warn('⚠️ Ignoring message during shutdown');
-      return;
+      return null;
     }
+    const userInfo = authorize(msg, allowedUsers);
+    if (!userInfo) {
+      instanceLogger.warn(
+        { userId: msg.from?.id, username: msg.from?.username },
+        '🚫 Ignoring message from a user not in TELEGRAM_ALLOWED_USERS',
+      );
+    }
+    return userInfo;
+  };
 
-    const userInfo = extractUserInfo(msg);
+  bot.on('photo', async (msg: TelegramBot.Message) => {
+    const userInfo = acceptMessage(msg);
+    if (!userInfo) return;
 
     instanceLogger.info(
-      { username: userInfo.username, chatId: userInfo.chatId, messageText: userInfo.messageText },
+      { userId: userInfo.userId, messageText: userInfo.messageText },
       '📸 Received a receipt photo',
     );
     bot.sendMessage(
@@ -120,7 +138,7 @@ const setupBotHandlers = () => {
       if (!photo) throw new Error('💁🏽 No se encontró ninguna foto en los mensajes');
 
       const processedInput = await processPhotoInput(photo, bot, token);
-      await handleReceiptProcessing(userInfo, processedInput, bot, instanceLogger);
+      await handleExpense(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process receipt');
       bot.sendMessage(userInfo.chatId, `❌ Failed to process receipt: ${err}`);
@@ -128,13 +146,8 @@ const setupBotHandlers = () => {
   });
 
   bot.on('document', async (msg: TelegramBot.Message) => {
-    // Prevent processing during shutdown
-    if (isShuttingDown) {
-      instanceLogger.warn('⚠️ Ignoring message during shutdown');
-      return;
-    }
-
-    const userInfo = extractUserInfo(msg);
+    const userInfo = acceptMessage(msg);
+    if (!userInfo) return;
 
     // Check if it's a PDF
     if (!msg.document?.mime_type?.includes('pdf')) {
@@ -143,14 +156,14 @@ const setupBotHandlers = () => {
     }
 
     instanceLogger.info(
-      { username: userInfo.username, chatId: userInfo.chatId, messageText: userInfo.messageText },
+      { userId: userInfo.userId, messageText: userInfo.messageText },
       '📄 Received a PDF receipt',
     );
     bot.sendMessage(userInfo.chatId, `💭 Recibímos el PDF del recibo, y empezamos a procesarlo...`);
 
     try {
       const processedInput = await processPdfInput(msg.document, bot, token, instanceLogger);
-      await handleReceiptProcessing(userInfo, processedInput, bot, instanceLogger);
+      await handleExpense(userInfo, processedInput, bot, instanceLogger);
     } catch (err) {
       instanceLogger.error({ err }, '❌ Failed to process PDF receipt');
       bot.sendMessage(userInfo.chatId, `❌ Failed to process PDF receipt: ${err}`);
@@ -158,32 +171,21 @@ const setupBotHandlers = () => {
   });
 
   bot.on('text', async (msg: TelegramBot.Message) => {
-    // Prevent processing during shutdown
-    if (isShuttingDown) {
-      instanceLogger.warn('⚠️ Ignoring message during shutdown');
-      return;
-    }
-
     // Ignore commands (starting with /)
     if (msg.text?.startsWith('/')) {
       return;
     }
 
-    const userInfo = extractUserInfoFromText(msg);
-    const text = msg.text || '';
+    const userInfo = acceptMessage(msg);
+    if (!userInfo) return;
 
     instanceLogger.info(
-      { username: userInfo.username, chatId: userInfo.chatId, text },
+      { userId: userInfo.userId, text: userInfo.messageText },
       '💬 Received a text expense',
     );
     bot.sendMessage(userInfo.chatId, `💭 Procesando tu gasto...`);
 
-    try {
-      await handleTextExpenseProcessing(userInfo, text, bot, instanceLogger);
-    } catch (err) {
-      instanceLogger.error({ err }, '❌ Failed to process text expense');
-      bot.sendMessage(userInfo.chatId, `❌ Failed to process expense: ${err}`);
-    }
+    await handleExpense(userInfo, undefined, bot, instanceLogger);
   });
 };
 

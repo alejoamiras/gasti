@@ -4,6 +4,7 @@ import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals
 const mockEnv = {
   TELEGRAM_BOT_TOKEN: 'mock-token-123',
   OPENAI_API_KEY: 'mock-openai-key',
+  TELEGRAM_ALLOWED_USERS: '111:alejo',
   BASE64_ENCODED_GOOGLE_SHEETS_CREDENTIALS: Buffer.from(
     JSON.stringify({
       type: 'service_account',

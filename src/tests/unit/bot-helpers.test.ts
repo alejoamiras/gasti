@@ -1,11 +1,6 @@
 import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import type { Message } from 'node-telegram-bot-api';
-import {
-  extractUserInfo,
-  extractUserInfoFromText,
-  processTextInput,
-  processExpense,
-} from '../../library/bot-helpers.js';
+import { authorize, parseAllowedUsers, processExpense } from '../../library/bot-helpers.js';
 
 // Mock dependencies
 jest.mock('../../library/sheets.js', () => ({
@@ -30,142 +25,96 @@ const mockLogger = {
   warn: jest.Mock;
 };
 
+const userInfo = { chatId: 123, userId: 111, payer: 'alejo', messageText: 'super 1500' };
+
 describe('Bot Helpers', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('extractUserInfo', () => {
-    it('should extract user info from message with username', () => {
-      const msg = {
-        chat: { id: 123 },
-        from: { username: 'alejoamiras' },
-        caption: 'Test caption',
-      } as unknown as Message;
-
-      const result = extractUserInfo(msg);
-
-      expect(result).toEqual({
-        chatId: 123,
-        username: 'alejoamiras',
-        payer: 'alejo',
-        messageText: 'Test caption',
-      });
+  describe('parseAllowedUsers', () => {
+    it('maps telegram user ids to payers', () => {
+      expect(parseAllowedUsers(' 111:alejo, 222:mora ,')).toEqual(
+        new Map([
+          [111, 'alejo'],
+          [222, 'mora'],
+        ]),
+      );
+      expect(parseAllowedUsers('')).toEqual(new Map());
     });
 
-    it('should extract user info from message with first name', () => {
-      const msg = {
-        chat: { id: 456 },
-        from: { first_name: 'John' },
-        caption: '',
-      } as unknown as Message;
-
-      const result = extractUserInfo(msg);
-
-      expect(result).toEqual({
-        chatId: 456,
-        username: 'John',
-        payer: 'John',
-        messageText: '',
-      });
-    });
-
-    it('should handle unknown user', () => {
-      const msg = {
-        chat: { id: 789 },
-        from: {},
-        caption: 'Some text',
-      } as unknown as Message;
-
-      const result = extractUserInfo(msg);
-
-      expect(result).toEqual({
-        chatId: 789,
-        username: 'Unknown',
-        payer: 'Unknown',
-        messageText: 'Some text',
-      });
+    it('rejects malformed entries', () => {
+      expect(() => parseAllowedUsers('alejoamiras:alejo')).toThrow('alejoamiras:alejo');
+      expect(() => parseAllowedUsers('111')).toThrow('111');
     });
   });
 
-  describe('extractUserInfoFromText', () => {
-    it('should extract user info from text message', () => {
-      const msg = {
-        chat: { id: 123 },
-        from: { username: 'morafreaza' },
-        text: 'Almuerzo 1500',
-      } as unknown as Message;
+  describe('authorize', () => {
+    const allowed = new Map([[111, 'alejo']]);
 
-      const result = extractUserInfoFromText(msg);
+    it('accepts allowlisted senders, taking the caption or the text', () => {
+      const photo = { chat: { id: 123 }, from: { id: 111 }, caption: 'Café' } as Message;
+      const text = { chat: { id: 123 }, from: { id: 111 }, text: 'Café 2800' } as Message;
 
-      expect(result).toEqual({
-        chatId: 123,
-        username: 'morafreaza',
-        payer: 'mora',
-        messageText: 'Almuerzo 1500',
-      });
+      expect(authorize(photo, allowed)).toEqual({ ...userInfo, messageText: 'Café' });
+      expect(authorize(text, allowed)?.messageText).toBe('Café 2800');
     });
-  });
 
-  describe('processTextInput', () => {
-    it('should return the input text unchanged', () => {
-      const text = 'Some expense text';
-      const result = processTextInput(text);
-      expect(result).toBe(text);
+    it('rejects anyone else, whatever their username', () => {
+      const msg = {
+        chat: { id: 9 },
+        from: { id: 999, username: 'alejoamiras' },
+        text: 'x',
+      } as unknown as Message;
+      expect(authorize(msg, allowed)).toBeNull();
+      expect(authorize({ chat: { id: 9 }, text: 'x' } as Message, allowed)).toBeNull();
     });
   });
 
   describe('processExpense', () => {
-    it('should process expense and send success message', async () => {
-      const llmResult = {
-        title: 'Supermercado',
-        amount: 1500,
-        category: '🛒',
-        description: 'Compras del super',
-        summary: 'Gasto de $1.500 agregado ✅',
-      };
+    it('writes the row and confirms what was written', async () => {
+      jest.mocked(writeExpenseRow).mockResolvedValueOnce({ tab: 'octubre 26', row: 13 });
 
-      const userInfo = {
-        chatId: 123,
-        username: 'alejoamiras',
-        payer: 'alejo',
-        messageText: 'super 1500',
-      };
-
-      await processExpense(llmResult, userInfo, mockBot as never, mockLogger as never);
+      await processExpense(
+        {
+          title: 'Supermercado',
+          amount: 15300.5,
+          category: '🛒',
+          description: 'Compras del super',
+        },
+        userInfo,
+        mockBot as never,
+        mockLogger as never,
+      );
 
       expect(writeExpenseRow).toHaveBeenCalledWith(
-        ['Supermercado', 'ARS', '1500', '1500', 'alejo', '🛒', 'Compras del super'],
+        {
+          title: 'Supermercado',
+          amount: 15300.5,
+          payer: 'alejo',
+          category: '🛒',
+          description: 'Compras del super',
+        },
         mockLogger,
       );
-      expect(mockBot.sendMessage).toHaveBeenCalledWith(123, 'Gasto de $1.500 agregado ✅');
-      expect(mockLogger.info).toHaveBeenCalled();
+      expect(mockBot.sendMessage).toHaveBeenCalledWith(
+        123,
+        '✅ Gasto agregado: Supermercado · $15.300,5 · 🛒 (octubre 26, fila 13)',
+      );
     });
 
-    it('should handle errors when saving expense', async () => {
-      const error = new Error('Database error');
-      jest.mocked(writeExpenseRow).mockRejectedValueOnce(error);
-
-      const llmResult = {
-        title: 'Test',
-        amount: 100,
-        category: '🤔',
-        description: 'Test',
-        summary: 'Test summary',
-      };
-
-      const userInfo = {
-        chatId: 456,
-        username: 'test',
-        payer: 'test',
-        messageText: 'test',
-      };
+    it('propagates sheet errors', async () => {
+      jest.mocked(writeExpenseRow).mockRejectedValueOnce(new Error('Database error'));
 
       await expect(
-        processExpense(llmResult, userInfo, mockBot as never, mockLogger as never),
+        processExpense(
+          { title: 'Test', amount: 100, category: '🤔', description: 'Test' },
+          userInfo,
+          mockBot as never,
+          mockLogger as never,
+        ),
       ).rejects.toThrow('Database error');
-
-      expect(mockLogger.error).toHaveBeenCalled();
+      expect(mockBot.sendMessage).not.toHaveBeenCalled();
     });
   });
 });
