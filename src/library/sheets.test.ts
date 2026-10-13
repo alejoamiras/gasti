@@ -8,6 +8,14 @@ const mockSheet = {
   e3: '',
   titles: [] as string[][],
   writes: 0,
+  duplicatedFrom: [] as number[],
+  writtenTo: [] as number[],
+  ids: new Map<string, number>(),
+};
+// Stable per-tab ids, like the real API: inserting a tab never renumbers the others.
+const mockSheetId = (title: string) => {
+  if (!mockSheet.ids.has(title)) mockSheet.ids.set(title, 100 + mockSheet.ids.size);
+  return mockSheet.ids.get(title) as number;
 };
 
 jest.mock('googleapis', () => ({
@@ -17,7 +25,9 @@ jest.mock('googleapis', () => ({
       spreadsheets: {
         get: async () => ({
           data: {
-            sheets: mockSheet.tabs.map((title, sheetId) => ({ properties: { title, sheetId } })),
+            sheets: mockSheet.tabs.map((title, index) => ({
+              properties: { title, index, sheetId: mockSheetId(title) },
+            })),
           },
         }),
         values: {
@@ -33,10 +43,18 @@ jest.mock('googleapis', () => ({
         }: {
           requestBody: sheets_v4.Schema$BatchUpdateSpreadsheetRequest;
         }) => {
+          const duplicate = requestBody.requests?.[0].duplicateSheet;
+          if (duplicate) {
+            mockSheet.duplicatedFrom.push(duplicate.sourceSheetId ?? -1);
+            mockSheet.tabs.splice(duplicate.insertSheetIndex ?? 0, 0, duplicate.newSheetName ?? '');
+            const sheetId = mockSheetId(duplicate.newSheetName ?? '');
+            return { data: { replies: [{ duplicateSheet: { properties: { sheetId } } }] } };
+          }
           const cells = requestBody.requests?.[0].updateCells;
           const title = cells?.rows?.[0].values?.[0].userEnteredValue?.stringValue ?? '';
           if (title === 'boom') throw new Error('rejected');
           mockSheet.titles[(cells?.range?.startRowIndex ?? 0) - 2] = [title];
+          mockSheet.writtenTo.push(cells?.range?.sheetId ?? -1);
           mockSheet.writes += 1;
         },
       },
@@ -121,6 +139,9 @@ describe('writeExpenseRow', () => {
       e3: '=IF(C3="USD";MULTIPLY($D3;$L$18);$D3)',
       titles: [['Expensas']],
       writes: 0,
+      duplicatedFrom: [],
+      writtenTo: [],
+      ids: new Map(),
     });
   });
 
@@ -139,9 +160,26 @@ describe('writeExpenseRow', () => {
     expect(mockSheet.titles).toEqual([['Expensas'], ['A'], ['C']]);
   });
 
-  it('writes nothing when the month tab or the ARS formula is missing', async () => {
-    mockSheet.tabs = ['template'];
-    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('No existe la pestaña');
+  it("creates the month's tab once from the template, just before it, and writes there", async () => {
+    mockSheet.tabs = ['septiembre 26', 'template', 'mari'];
+    const templateId = mockSheetId('template');
+
+    const rows = await Promise.all([writeExpenseRow(expense('A')), writeExpenseRow(expense('B'))]);
+
+    expect(rows).toEqual([
+      { tab: monthTabName(), row: 4 },
+      { tab: monthTabName(), row: 5 },
+    ]);
+    expect(mockSheet.tabs).toEqual(['septiembre 26', monthTabName(), 'template', 'mari']);
+    const monthId = mockSheetId(monthTabName());
+    expect(mockSheet.duplicatedFrom).toEqual([templateId]);
+    expect(mockSheet.writtenTo).toEqual([monthId, monthId]);
+    expect(monthId).not.toBe(templateId);
+  });
+
+  it('writes nothing without a month tab or template, or without the ARS formula', async () => {
+    mockSheet.tabs = ['mari'];
+    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('ni la plantilla');
 
     mockSheet.tabs = [monthTabName()];
     mockSheet.e3 = '';
