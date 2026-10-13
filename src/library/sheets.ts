@@ -188,7 +188,7 @@ async function monthSheetId(
         {
           duplicateSheet: {
             sourceSheetId: template.sheetId,
-            // Taking the template's position keeps month tabs in calendar order before it.
+            // Inserted immediately before the template.
             insertSheetIndex: template.index ?? undefined,
             newSheetName: tab,
           },
