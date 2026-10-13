@@ -18,6 +18,7 @@ const MONTHS_IN_SPANISH = [
 ];
 
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
+const TEMPLATE_TAB = 'template';
 const FIRST_DATA_ROW = 3;
 
 // Zero-based column indexes of a month tab: B Gasto, C Moneda, D Monto, E ARS,
@@ -161,6 +162,48 @@ export function buildRowRequests(
   ];
 }
 
+/** Id of the month tab, duplicating the template into it on the month's first write. */
+async function monthSheetId(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tab: string,
+  log: Logger,
+): Promise<number> {
+  const meta = await sheets.spreadsheets.get({
+    spreadsheetId,
+    fields: 'sheets.properties(sheetId,title,index)',
+  });
+  const tabs = meta.data.sheets?.map((s) => s.properties) ?? [];
+  const existing = tabs.find((t) => t?.title === tab)?.sheetId;
+  if (existing != null) return existing;
+
+  const template = tabs.find((t) => t?.title === TEMPLATE_TAB);
+  if (template?.sheetId == null) {
+    throw new Error(`No existe la pestaña "${tab}" ni la plantilla "${TEMPLATE_TAB}"`);
+  }
+  const res = await sheets.spreadsheets.batchUpdate({
+    spreadsheetId,
+    requestBody: {
+      requests: [
+        {
+          duplicateSheet: {
+            sourceSheetId: template.sheetId,
+            // Taking the template's position keeps month tabs in calendar order before it.
+            insertSheetIndex: template.index ?? undefined,
+            newSheetName: tab,
+          },
+        },
+      ],
+    },
+  });
+  const created = res.data.replies?.[0]?.duplicateSheet?.properties?.sheetId;
+  if (created == null) {
+    throw new Error(`No se pudo crear la pestaña "${tab}" desde "${TEMPLATE_TAB}"`);
+  }
+  log.info({ tab }, '🗓️ Created month tab from the template');
+  return created;
+}
+
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 /** Runs writes one at a time: concurrent messages would otherwise claim the same empty row. */
@@ -178,15 +221,7 @@ export function writeExpenseRow(expense: ExpenseRow, instanceLogger?: Logger): P
     const tab = monthTabName();
 
     try {
-      const meta = await sheets.spreadsheets.get({
-        spreadsheetId,
-        fields: 'sheets.properties(sheetId,title)',
-      });
-      const sheetId = meta.data.sheets?.find((s) => s.properties?.title === tab)?.properties
-        ?.sheetId;
-      if (sheetId == null) {
-        throw new Error(`No existe la pestaña "${tab}" en la planilla`);
-      }
+      const sheetId = await monthSheetId(sheets, spreadsheetId, tab, log);
 
       const res = await sheets.spreadsheets.values.batchGet({
         spreadsheetId,

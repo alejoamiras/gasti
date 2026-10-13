@@ -17,7 +17,9 @@ jest.mock('googleapis', () => ({
       spreadsheets: {
         get: async () => ({
           data: {
-            sheets: mockSheet.tabs.map((title, sheetId) => ({ properties: { title, sheetId } })),
+            sheets: mockSheet.tabs.map((title, index) => ({
+              properties: { title, index, sheetId: 100 + index },
+            })),
           },
         }),
         values: {
@@ -33,6 +35,11 @@ jest.mock('googleapis', () => ({
         }: {
           requestBody: sheets_v4.Schema$BatchUpdateSpreadsheetRequest;
         }) => {
+          const duplicate = requestBody.requests?.[0].duplicateSheet;
+          if (duplicate) {
+            mockSheet.tabs.splice(duplicate.insertSheetIndex ?? 0, 0, duplicate.newSheetName ?? '');
+            return { data: { replies: [{ duplicateSheet: { properties: { sheetId: 999 } } }] } };
+          }
           const cells = requestBody.requests?.[0].updateCells;
           const title = cells?.rows?.[0].values?.[0].userEnteredValue?.stringValue ?? '';
           if (title === 'boom') throw new Error('rejected');
@@ -139,9 +146,16 @@ describe('writeExpenseRow', () => {
     expect(mockSheet.titles).toEqual([['Expensas'], ['A'], ['C']]);
   });
 
-  it('writes nothing when the month tab or the ARS formula is missing', async () => {
-    mockSheet.tabs = ['template'];
-    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('No existe la pestaña');
+  it("creates the month's tab from the template, just before it", async () => {
+    mockSheet.tabs = ['septiembre 26', 'template', 'mari'];
+
+    await expect(writeExpenseRow(expense('A'))).resolves.toEqual({ tab: monthTabName(), row: 4 });
+    expect(mockSheet.tabs).toEqual(['septiembre 26', monthTabName(), 'template', 'mari']);
+  });
+
+  it('writes nothing without a month tab or template, or without the ARS formula', async () => {
+    mockSheet.tabs = ['mari'];
+    await expect(writeExpenseRow(expense('A'))).rejects.toThrow('ni la plantilla');
 
     mockSheet.tabs = [monthTabName()];
     mockSheet.e3 = '';

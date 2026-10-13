@@ -106,7 +106,7 @@ This script includes memory optimizations:
 
 ## Spreadsheet layout
 
-The bot writes to the tab named after the current month in Argentina time plus the two-digit year, e.g. `octubre 26`, and fails with a clear message if that tab doesn't exist. Rows start at row 3, with columns B `Gasto`, C `Moneda`, D `Monto`, E `ARS` (copied from E3's formula), F `Paga`, G `Categoría`, H `Tipo` (always `variable`) and I `Comments`.
+The bot writes to the tab named after the current month in Argentina time plus the two-digit year, e.g. `octubre 26`. If that tab doesn't exist yet, it duplicates `template` into it, placed just before `template`. Rows start at row 3, with columns B `Gasto`, C `Moneda`, D `Monto`, E `ARS` (copied from E3's formula), F `Paga`, G `Categoría`, H `Tipo` (always `variable`) and I `Comments`.
 
 ## Deployment (Railway)
 
