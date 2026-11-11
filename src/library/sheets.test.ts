@@ -345,8 +345,11 @@ describe('writeExpenseRow', () => {
     it('is fixed at its current value in every month still live, wherever the cell is', async () => {
       const december = new Date('2026-12-01T09:00:00-03:00');
       mockSheet.tabs = ['octubre 26', 'noviembre 26', 'diciembre 26'];
-      // October has an expense titled like the label above its real rate cell (L18).
-      mockSheet.grids.set('octubre 26', withRate(sideLayout('Cambio Dólares'), 17, 10, LIVE_RATE));
+      // Above October's real rate cell (L18) sits an expense titled like the label, in a
+      // column order that puts its amount where a rate would be.
+      const [gasto, moneda, monto, ...rest] = HEADERS;
+      const october = [[], ['', gasto, monto, moneda, ...rest], ['', 'Cambio Dólares', 100, 'ARS']];
+      mockSheet.grids.set('octubre 26', withRate(october, 17, 10, LIVE_RATE));
       mockSheet.grids.set('noviembre 26', withRate(topLayout('Expensas'), 3, 0, LIVE_RATE));
       mockSheet.grids.set('diciembre 26', sideLayout('Expensas'));
       mockSheet.computed.set("'octubre 26'!L18", 1500).set("'noviembre 26'!B4", 1550.25);
@@ -361,7 +364,7 @@ describe('writeExpenseRow', () => {
       });
       expect(gridOf('octubre 26')[17][11]).toBe(1500);
       expect(gridOf('noviembre 26')[3][1]).toBe(1550.25);
-      expect(gridOf('octubre 26')[2][2]).toBe('ARS');
+      expect(gridOf('octubre 26')[2][2]).toBe(100);
 
       // Now that both are plain numbers, the next write leaves them alone.
       await expect(writeExpenseRow(expense('B', december))).resolves.toEqual({

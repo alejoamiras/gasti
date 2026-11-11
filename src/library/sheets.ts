@@ -284,20 +284,15 @@ const FREEZE_LOOKBACK_MONTHS = 12;
 
 /**
  * Zero-based position and FORMULA-rendered value of a tab's exchange rate: the cell right of
- * the rate label that holds a number or a formula. An expense may be titled like the label,
- * but its neighbour is text.
+ * the rate label. A Gasto cell is never the label, since an expense may be titled like it.
  */
-function findRateCell(
-  grid: unknown[][],
-): { row: number; col: number; value: number | string } | null {
+function findRateCell(grid: unknown[][]): { row: number; col: number; value: unknown } | null {
+  const layout = findLayout(grid);
   for (const [row, cells] of grid.entries()) {
     for (const [index, cell] of cells.entries()) {
-      const value = cells[index + 1];
-      const isRate =
-        typeof value === 'number' || (typeof value === 'string' && value.startsWith('='));
-      if (typeof cell === 'string' && cell.trim() === RATE_LABEL && isRate) {
-        return { row, col: index + 1, value };
-      }
+      if (typeof cell !== 'string' || cell.trim() !== RATE_LABEL) continue;
+      if (layout && row >= layout.firstDataRow - 1 && index === layout.cols.title) continue;
+      return { row, col: index + 1, value: cells[index + 1] };
     }
   }
   return null;
