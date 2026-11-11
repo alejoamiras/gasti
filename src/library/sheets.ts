@@ -19,11 +19,32 @@ const MONTHS_IN_SPANISH = [
 
 const TIME_ZONE = 'America/Argentina/Buenos_Aires';
 const TEMPLATE_TAB = 'template';
-const FIRST_DATA_ROW = 3;
+// Label of the cell to the left of a tab's USD→ARS rate.
+const RATE_LABEL = 'Cambio Dólares';
 
-// Zero-based column indexes of a month tab: B Gasto, C Moneda, D Monto, E ARS,
-// F Paga, G Categoría, H Tipo, I Comments.
-const COL = { title: 1, amount: 3, ars: 4, payer: 5, comments: 8 } as const;
+// Header text of each expense column. The expense table is found by these names, not by
+// position, so a tab may place it anywhere.
+const HEADERS = {
+  title: 'Gasto',
+  currency: 'Moneda',
+  amount: 'Monto',
+  ars: 'ARS',
+  payer: 'Paga',
+  category: 'Categoría',
+  type: 'Tipo',
+  comments: 'Comments',
+} as const;
+// Optional: tabs created before the column existed don't have it.
+const DATE_HEADER = 'Fecha';
+
+type Field = keyof typeof HEADERS;
+
+export interface TabLayout {
+  /** 1-based row of the first expense. */
+  firstDataRow: number;
+  /** Zero-based column of each field; `date` is absent on tabs without a Fecha column. */
+  cols: Record<Field, number> & { date?: number };
+}
 
 export interface ExpenseRow {
   title: string;
@@ -31,11 +52,18 @@ export interface ExpenseRow {
   payer: string;
   category: string;
   description: string;
+  /** When the expense was sent. Its day in Argentina fills Fecha and picks the month tab. */
+  date: Date;
 }
 
 export interface WrittenRow {
   tab: string;
   row: number;
+  /**
+   * Present when this write found the previous month's exchange rate still live: the value
+   * it was fixed at, or null when fixing it failed.
+   */
+  frozenRate?: { tab: string; rate: number | null };
 }
 
 interface SheetsConfig {
@@ -74,21 +102,61 @@ function getSheetsClient(): sheets_v4.Sheets {
   return client;
 }
 
-/** Month tabs are named "<mes> <yy>" in Argentina time, e.g. "octubre 26". */
-export function monthTabName(date: Date = new Date()): string {
+/** Calendar day of an instant in Argentina; `month` is 1-12. */
+function argentinaDay(date: Date): { year: number; month: number; day: number } {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: TIME_ZONE,
+    year: 'numeric',
     month: 'numeric',
-    year: '2-digit',
+    day: 'numeric',
   }).formatToParts(date);
-  const part = (type: string) => parts.find((p) => p.type === type)?.value;
-  return `${MONTHS_IN_SPANISH[Number(part('month')) - 1]} ${part('year')}`;
+  const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  return { year: part('year'), month: part('month'), day: part('day') };
 }
 
-/** 1-based row of the first empty Gasto cell, given column B read from FIRST_DATA_ROW down. */
-export function firstEmptyRow(columnB: unknown[][]): number {
-  const index = columnB.findIndex((cells) => cells[0] === undefined || cells[0] === '');
-  return FIRST_DATA_ROW + (index === -1 ? columnB.length : index);
+/**
+ * Month tabs are named "<mes> <yy>" in Argentina time, e.g. "octubre 26". `monthsBack`
+ * names an earlier month's tab instead.
+ */
+export function monthTabName(date: Date = new Date(), monthsBack = 0): string {
+  const { year, month } = argentinaDay(date);
+  const index = year * 12 + (month - 1) - monthsBack;
+  return `${MONTHS_IN_SPANISH[index % 12]} ${String(Math.floor(index / 12)).slice(-2)}`;
+}
+
+/** Google Sheets serial number (days since 1899-12-30) of an instant's day in Argentina. */
+export function sheetDateSerial(date: Date): number {
+  const { year, month, day } = argentinaDay(date);
+  return Date.UTC(year, month - 1, day) / 86_400_000 + 25_569;
+}
+
+/**
+ * Locates the expense table in a tab's cells: the first row holding every required header
+ * is the header row, and expenses start right under it.
+ */
+export function findLayout(grid: unknown[][]): TabLayout | null {
+  for (const [index, row] of grid.entries()) {
+    const column = (header: string) =>
+      row.findIndex((cell) => typeof cell === 'string' && cell.trim() === header);
+    const cols = Object.fromEntries(
+      Object.entries(HEADERS).map(([field, header]) => [field, column(header)]),
+    ) as Record<Field, number>;
+    if (Object.values(cols).includes(-1)) continue;
+    const date = column(DATE_HEADER);
+    return { firstDataRow: index + 2, cols: date === -1 ? cols : { ...cols, date } };
+  }
+  return null;
+}
+
+/** 1-based row of the first expense row whose Gasto cell is empty. */
+export function firstEmptyRow(grid: unknown[][], layout: TabLayout): number {
+  let row = layout.firstDataRow;
+  while (row <= grid.length) {
+    const cell = grid[row - 1]?.[layout.cols.title];
+    if (cell === undefined || cell === '') break;
+    row += 1;
+  }
+  return row;
 }
 
 /**
@@ -99,86 +167,87 @@ export function firstEmptyRow(columnB: unknown[][]): number {
 export function buildRowRequests(
   sheetId: number,
   row: number,
+  layout: TabLayout,
   expense: ExpenseRow,
 ): sheets_v4.Schema$Request[] {
-  const rowIndex = row - 1;
-  const range = (start: number, end: number) => ({
+  const { cols } = layout;
+  const cell = (rowNumber: number, col: number) => ({
     sheetId,
-    startRowIndex: rowIndex,
-    endRowIndex: rowIndex + 1,
-    startColumnIndex: start,
-    endColumnIndex: end,
+    startRowIndex: rowNumber - 1,
+    endRowIndex: rowNumber,
+    startColumnIndex: col,
+    endColumnIndex: col + 1,
   });
   // stringValue is stored verbatim, so text from the model can never become a formula.
   const text = (value: string) => ({ userEnteredValue: { stringValue: value } });
+  const write = (
+    col: number,
+    data: sheets_v4.Schema$CellData,
+    fields = 'userEnteredValue',
+  ): sheets_v4.Schema$Request => ({
+    updateCells: { range: cell(row, col), rows: [{ values: [data] }], fields },
+  });
 
-  return [
-    {
-      updateCells: {
-        range: range(COL.title, COL.amount + 1),
-        rows: [
-          {
-            values: [
-              text(expense.title),
-              text('ARS'),
-              { userEnteredValue: { numberValue: expense.amount } },
-            ],
-          },
-        ],
-        fields: 'userEnteredValue',
-      },
-    },
+  const requests = [
+    write(cols.title, text(expense.title)),
+    write(cols.currency, text('ARS')),
+    write(cols.amount, { userEnteredValue: { numberValue: expense.amount } }),
     {
       // The ARS column holds the USD conversion formula, which not every row has
       // pre-filled; copying it keeps the sheet's own formula and locale.
       copyPaste: {
-        source: {
-          sheetId,
-          startRowIndex: FIRST_DATA_ROW - 1,
-          endRowIndex: FIRST_DATA_ROW,
-          startColumnIndex: COL.ars,
-          endColumnIndex: COL.ars + 1,
-        },
-        destination: range(COL.ars, COL.ars + 1),
+        source: cell(layout.firstDataRow, cols.ars),
+        destination: cell(row, cols.ars),
         pasteType: 'PASTE_FORMULA',
       },
     },
-    {
-      updateCells: {
-        range: range(COL.payer, COL.comments + 1),
-        rows: [
-          {
-            values: [
-              text(expense.payer),
-              text(expense.category),
-              text('variable'),
-              text(expense.description),
-            ],
-          },
-        ],
-        fields: 'userEnteredValue',
-      },
-    },
+    write(cols.payer, text(expense.payer)),
+    write(cols.category, text(expense.category)),
+    write(cols.type, text('variable')),
+    write(cols.comments, text(expense.description)),
   ];
+  if (cols.date !== undefined) {
+    requests.push(
+      write(
+        cols.date,
+        {
+          // A real date, shown as dd/mm, so the column sorts and filters.
+          userEnteredValue: { numberValue: sheetDateSerial(expense.date) },
+          userEnteredFormat: { numberFormat: { type: 'DATE', pattern: 'dd/mm' } },
+        },
+        'userEnteredValue,userEnteredFormat.numberFormat',
+      ),
+    );
+  }
+  return requests;
 }
 
-/** Id of the month tab, duplicating the template into it on the month's first write. */
-async function monthSheetId(
-  sheets: sheets_v4.Sheets,
-  spreadsheetId: string,
-  tab: string,
-  log: Logger,
-): Promise<number> {
+type Tabs = Map<string, { sheetId: number; index: number }>;
+
+async function listTabs(sheets: sheets_v4.Sheets, spreadsheetId: string): Promise<Tabs> {
   const meta = await sheets.spreadsheets.get({
     spreadsheetId,
     fields: 'sheets.properties(sheetId,title,index)',
   });
-  const tabs = meta.data.sheets?.map((s) => s.properties) ?? [];
-  const existing = tabs.find((t) => t?.title === tab)?.sheetId;
-  if (existing != null) return existing;
+  const tabs: Tabs = new Map();
+  for (const { properties } of meta.data.sheets ?? []) {
+    if (properties?.title != null && properties.sheetId != null) {
+      tabs.set(properties.title, { sheetId: properties.sheetId, index: properties.index ?? 0 });
+    }
+  }
+  return tabs;
+}
 
-  const template = tabs.find((t) => t?.title === TEMPLATE_TAB);
-  if (template?.sheetId == null) {
+/** Duplicates the template into a new month tab and returns its id. */
+async function createMonthTab(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabs: Tabs,
+  tab: string,
+  log: Logger,
+): Promise<number> {
+  const template = tabs.get(TEMPLATE_TAB);
+  if (!template) {
     throw new Error(`No existe la pestaña "${tab}" ni la plantilla "${TEMPLATE_TAB}"`);
   }
   const res = await sheets.spreadsheets.batchUpdate({
@@ -189,7 +258,7 @@ async function monthSheetId(
           duplicateSheet: {
             sourceSheetId: template.sheetId,
             // Inserted immediately before the template.
-            insertSheetIndex: template.index ?? undefined,
+            insertSheetIndex: template.index,
             newSheetName: tab,
           },
         },
@@ -204,6 +273,76 @@ async function monthSheetId(
   return created;
 }
 
+// Tabs whose rate is known to be a fixed number, so each is read once per process.
+const frozenTabs = new Set<string>();
+
+/**
+ * Replaces a tab's live exchange-rate formula with its current value, so a closed month's
+ * totals stop moving with the market. Never throws: it runs after the expense is written,
+ * and the next write retries a failure.
+ */
+async function freezeRate(
+  sheets: sheets_v4.Sheets,
+  spreadsheetId: string,
+  tabs: Tabs,
+  tab: string,
+  log: Logger,
+): Promise<WrittenRow['frozenRate']> {
+  const sheetId = tabs.get(tab)?.sheetId;
+  if (sheetId == null || frozenTabs.has(tab)) return undefined;
+  try {
+    const res = await sheets.spreadsheets.get({
+      spreadsheetId,
+      ranges: [`'${tab}'!A1:Z`],
+      fields: 'sheets.data.rowData.values(userEnteredValue,effectiveValue)',
+    });
+    const rows = res.data.sheets?.[0]?.data?.[0]?.rowData ?? [];
+    for (const [rowIndex, row] of rows.entries()) {
+      const cells = row.values ?? [];
+      const label = cells.findIndex((c) => c.userEnteredValue?.stringValue?.trim() === RATE_LABEL);
+      if (label === -1) continue;
+
+      const cell = cells[label + 1];
+      if (cell?.userEnteredValue?.formulaValue == null) {
+        frozenTabs.add(tab);
+        return undefined;
+      }
+      const rate = cell.effectiveValue?.numberValue;
+      // GOOGLEFINANCE yields an error value while it has no quote.
+      if (typeof rate !== 'number' || !(rate > 0)) {
+        throw new Error(`El cambio de "${tab}" no es un número`);
+      }
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [
+            {
+              updateCells: {
+                range: {
+                  sheetId,
+                  startRowIndex: rowIndex,
+                  endRowIndex: rowIndex + 1,
+                  startColumnIndex: label + 1,
+                  endColumnIndex: label + 2,
+                },
+                rows: [{ values: [{ userEnteredValue: { numberValue: rate } }] }],
+                fields: 'userEnteredValue',
+              },
+            },
+          ],
+        },
+      });
+      frozenTabs.add(tab);
+      log.info({ tab, rate }, '🔒 Froze the exchange rate of a closed month');
+      return { tab, rate };
+    }
+    throw new Error(`"${tab}" no tiene la celda "${RATE_LABEL}"`);
+  } catch (err) {
+    log.warn({ err, tab }, '⚠️ Could not freeze the exchange rate');
+    return { tab, rate: null };
+  }
+}
+
 let writeQueue: Promise<unknown> = Promise.resolve();
 
 /** Runs writes one at a time: concurrent messages would otherwise claim the same empty row. */
@@ -213,36 +352,60 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
   return run;
 }
 
+/**
+ * Appends the expense to its month's tab, creating the tab from the template on the
+ * month's first expense, then fixes the previous month's exchange rate if it is still live.
+ */
 export function writeExpenseRow(expense: ExpenseRow, instanceLogger?: Logger): Promise<WrittenRow> {
   const log = instanceLogger || logger;
   return serialized(async () => {
     const sheets = getSheetsClient();
     const { spreadsheetId } = loadSheetsConfig();
-    const tab = monthTabName();
+    const tab = monthTabName(expense.date);
 
+    let tabs: Tabs;
+    let row: number;
     try {
-      const sheetId = await monthSheetId(sheets, spreadsheetId, tab, log);
+      tabs = await listTabs(sheets, spreadsheetId);
+      const sheetId =
+        tabs.get(tab)?.sheetId ?? (await createMonthTab(sheets, spreadsheetId, tabs, tab, log));
 
-      const res = await sheets.spreadsheets.values.batchGet({
+      const res = await sheets.spreadsheets.values.get({
         spreadsheetId,
-        ranges: [`'${tab}'!B${FIRST_DATA_ROW}:B`, `'${tab}'!E${FIRST_DATA_ROW}`],
+        range: `'${tab}'!A1:Z`,
         valueRenderOption: 'FORMULA',
       });
-      const [titles, arsSource] = res.data.valueRanges || [];
-      if (!String(arsSource?.values?.[0]?.[0] ?? '').startsWith('=')) {
-        throw new Error(`E${FIRST_DATA_ROW} de "${tab}" no tiene la fórmula de ARS para copiar`);
+      const grid = res.data.values ?? [];
+      const layout = findLayout(grid);
+      if (!layout) {
+        throw new Error(
+          `"${tab}" no tiene la fila de encabezados (${Object.values(HEADERS).join(', ')})`,
+        );
       }
-      const row = firstEmptyRow(titles?.values || []);
+      if (!String(grid[layout.firstDataRow - 1]?.[layout.cols.ars] ?? '').startsWith('=')) {
+        throw new Error(
+          `La primera fila de gastos de "${tab}" no tiene la fórmula de ARS para copiar`,
+        );
+      }
+      row = firstEmptyRow(grid, layout);
 
       await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
-        requestBody: { requests: buildRowRequests(sheetId, row, expense) },
+        requestBody: { requests: buildRowRequests(sheetId, row, layout, expense) },
       });
       log.info({ expense, tab, row }, '📊 Expense row written to Google Sheets');
-      return { tab, row };
     } catch (err) {
       log.error({ err, expense, tab }, '❌ Failed to write expense row to Google Sheets');
       throw err;
     }
+
+    const frozenRate = await freezeRate(
+      sheets,
+      spreadsheetId,
+      tabs,
+      monthTabName(expense.date, 1),
+      log,
+    );
+    return { tab, row, ...(frozenRate && { frozenRate }) };
   });
 }

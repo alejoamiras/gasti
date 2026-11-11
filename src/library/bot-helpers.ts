@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import type { Logger } from 'pino';
-import { writeExpenseRow } from './sheets.js';
+import { writeExpenseRow, type WrittenRow } from './sheets.js';
 import { extractExpense, type ExpenseInput, type ExtractedExpense } from './llm.js';
 import { convertPdfToImages } from './pdf.js';
 import { maskBotTokens } from './logger.js';
@@ -11,6 +11,8 @@ export interface UserInfo {
   userId: number;
   payer: string;
   messageText: string;
+  /** When the message was sent; it dates the expense and picks its month tab. */
+  sentAt: Date;
 }
 
 // Interface for processed input data
@@ -56,6 +58,9 @@ export function authorize(
     userId: from.id,
     payer,
     messageText: msg.caption || msg.text || '',
+    // Telegram's date is in seconds. It is used rather than the processing time, so a
+    // message queued while the bot was down still lands on the day it was sent.
+    sentAt: new Date(msg.date * 1000),
   };
 }
 
@@ -77,11 +82,21 @@ export async function notify(
   }
 }
 
-export function formatConfirmation(expense: ExtractedExpense, tab: string, row: number): string {
-  const amount = new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(
-    expense.amount,
-  );
-  return `✅ Gasto agregado: ${expense.title} · $${amount} · ${expense.category} (${tab}, fila ${row})`;
+export function formatConfirmation(expense: ExtractedExpense, written: WrittenRow): string {
+  const number = (value: number) =>
+    new Intl.NumberFormat('es-AR', { maximumFractionDigits: 2 }).format(value);
+  const lines = [
+    `✅ Gasto agregado: ${expense.title} · $${number(expense.amount)} · ${expense.category} (${written.tab}, fila ${written.row})`,
+  ];
+  const frozen = written.frozenRate;
+  if (frozen) {
+    lines.push(
+      frozen.rate === null
+        ? `⚠️ No pude fijar el cambio de ${frozen.tab}; reintento con el próximo gasto`
+        : `🔒 Cambio de ${frozen.tab} fijado en $${number(frozen.rate)}`,
+    );
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -93,19 +108,20 @@ export async function processExpense(
   bot: TelegramBot,
   instanceLogger: Logger,
 ): Promise<void> {
-  const { tab, row } = await writeExpenseRow(
+  const written = await writeExpenseRow(
     {
       title: expense.title,
       amount: expense.amount,
       payer: userInfo.payer,
       category: expense.category,
       description: expense.description,
+      date: userInfo.sentAt,
     },
     instanceLogger,
   );
-  instanceLogger.info({ userId: userInfo.userId, tab, row }, '📊 Expense added to Google Sheets');
+  instanceLogger.info({ userId: userInfo.userId, ...written }, '📊 Expense added to Google Sheets');
 
-  await notify(bot, userInfo.chatId, formatConfirmation(expense, tab, row), instanceLogger);
+  await notify(bot, userInfo.chatId, formatConfirmation(expense, written), instanceLogger);
 }
 
 /** Downloads a Telegram file; the URL embeds the bot token, so a failure reports only the status. */
