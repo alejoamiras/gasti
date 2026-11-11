@@ -345,10 +345,16 @@ describe('writeExpenseRow', () => {
     it('is fixed at its current value in every month still live, wherever the cell is', async () => {
       const december = new Date('2026-12-01T09:00:00-03:00');
       mockSheet.tabs = ['octubre 26', 'noviembre 26', 'diciembre 26'];
-      // Above October's real rate cell (L18) sits an expense titled like the label, in a
-      // column order that puts its amount where a rate would be.
+      // Above October's real rate cell (L18) sit two expenses that read like the label: one
+      // by its title, in a column order that puts its amount where a rate would be, and one
+      // by its comment.
       const [gasto, moneda, monto, ...rest] = HEADERS;
-      const october = [[], ['', gasto, monto, moneda, ...rest], ['', 'Cambio Dólares', 100, 'ARS']];
+      const october = [
+        [],
+        ['', gasto, monto, moneda, ...rest],
+        ['', 'Cambio Dólares', 100, 'ARS'],
+        ['', 'Casa de cambio', 50, 'ARS', '', '', '', '', 'Cambio Dólares'],
+      ];
       mockSheet.grids.set('octubre 26', withRate(october, 17, 10, LIVE_RATE));
       mockSheet.grids.set('noviembre 26', withRate(topLayout('Expensas'), 3, 0, LIVE_RATE));
       mockSheet.grids.set('diciembre 26', sideLayout('Expensas'));
