@@ -88,8 +88,7 @@ export function formatConfirmation(expense: ExtractedExpense, written: WrittenRo
   const lines = [
     `✅ Gasto agregado: ${expense.title} · $${number(expense.amount)} · ${expense.category} (${written.tab}, fila ${written.row})`,
   ];
-  const frozen = written.frozenRate;
-  if (frozen) {
+  for (const frozen of written.frozenRates ?? []) {
     lines.push(
       frozen.rate === null
         ? `⚠️ No pude fijar el cambio de ${frozen.tab}; reintento con el próximo gasto`

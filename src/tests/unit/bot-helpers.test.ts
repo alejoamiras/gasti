@@ -130,24 +130,27 @@ describe('Bot Helpers', () => {
       );
     });
 
-    it("reports the previous month's exchange rate when the write fixed it, or failed to", async () => {
-      const written = { tab: 'noviembre 26', row: 3 };
-      const reply = async (rate: number | null) => {
-        jest
-          .mocked(writeExpenseRow)
-          .mockResolvedValueOnce({ ...written, frozenRate: { tab: 'octubre 26', rate } });
-        mockBot.sendMessage.mockClear();
-        await processExpense(
-          { title: 'Café', amount: 2800, category: '🍾', description: 'Café' },
-          userInfo,
-          mockBot as never,
-          mockLogger as never,
-        );
-        return (mockBot.sendMessage.mock.calls[0][1] as string).split('\n')[1];
-      };
+    it('reports each earlier exchange rate the write fixed, or failed to', async () => {
+      jest.mocked(writeExpenseRow).mockResolvedValueOnce({
+        tab: 'diciembre 26',
+        row: 3,
+        frozenRates: [
+          { tab: 'noviembre 26', rate: 1550.25 },
+          { tab: 'octubre 26', rate: null },
+        ],
+      });
 
-      expect(await reply(1550.25)).toBe('🔒 Cambio de octubre 26 fijado en $1.550,25');
-      expect(await reply(null)).toContain('⚠️ No pude fijar el cambio de octubre 26');
+      await processExpense(
+        { title: 'Café', amount: 2800, category: '🍾', description: 'Café' },
+        userInfo,
+        mockBot as never,
+        mockLogger as never,
+      );
+
+      expect((mockBot.sendMessage.mock.calls[0][1] as string).split('\n').slice(1)).toEqual([
+        '🔒 Cambio de noviembre 26 fijado en $1.550,25',
+        '⚠️ No pude fijar el cambio de octubre 26; reintento con el próximo gasto',
+      ]);
     });
 
     it('does not report a failed confirmation as a failed write', async () => {

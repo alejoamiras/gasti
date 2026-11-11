@@ -108,9 +108,9 @@ This script includes memory optimizations:
 
 The bot writes to the tab named after the month the message was sent in, in Argentina time, plus the two-digit year, e.g. `octubre 26`. If that tab doesn't exist yet, it duplicates `template` into it, placed just before `template`.
 
-It finds the expense table by its header row (`Gasto`, `Moneda`, `Monto`, `ARS`, `Paga`, `Categoría`, `Tipo` and `Comments`, in any columns) and fills the first empty row under it, so the rest of the tab can be laid out freely. `ARS` is copied from the first expense row's formula and `Tipo` is always `variable`. If the header row also has a `Fecha` column, it gets the day the message was sent, as a date shown as dd/mm.
+It finds the expense table by its header row (`Gasto`, `Moneda`, `Monto`, `ARS`, `Paga`, `Categoría`, `Tipo` and `Comments`, in any order) and fills the first row under it whose `Gasto` cell is empty, so the summary can sit beside the table or above it. The table must be within columns A:Z, and no other cell on the header row may repeat one of those names. `ARS` is copied from the first expense row's formula and `Tipo` is always `variable`. If the header row also has a `Fecha` column, it gets the day the message was sent, as a date shown as dd/mm.
 
-The cell to the right of `Cambio Dólares` is the tab's USD→ARS rate. When an expense arrives and the previous month's tab still has a formula there, the bot replaces it with its current value, so a closed month's totals stop moving with the market. It says so in the confirmation message.
+The number or formula to the right of a `Cambio Dólares` cell is the tab's USD→ARS rate. Every time an expense is written, the bot looks at the tabs of the twelve months before it and replaces any rate that is still a formula with its current value, so a closed month's totals stop moving with the market. The confirmation message says which months were fixed, or could not be.
 
 ## Deployment (Railway)
 

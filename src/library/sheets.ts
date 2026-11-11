@@ -60,10 +60,15 @@ export interface WrittenRow {
   tab: string;
   row: number;
   /**
-   * Present when this write found the previous month's exchange rate still live: the value
-   * it was fixed at, or null when fixing it failed.
+   * Earlier months whose exchange rate this write found still live: the value each was
+   * fixed at, or null when fixing it failed.
    */
-  frozenRate?: { tab: string; rate: number | null };
+  frozenRates?: FrozenRate[];
+}
+
+export interface FrozenRate {
+  tab: string;
+  rate: number | null;
 }
 
 interface SheetsConfig {
@@ -273,41 +278,76 @@ async function createMonthTab(
   return created;
 }
 
-// Tabs whose rate is known to be a fixed number, so each is read once per process.
-const frozenTabs = new Set<string>();
+// Every write rechecks this many earlier months, so one whose freeze failed, or whose
+// following month had no expenses, is still fixed later.
+const FREEZE_LOOKBACK_MONTHS = 12;
 
 /**
- * Replaces a tab's live exchange-rate formula with its current value, so a closed month's
- * totals stop moving with the market. Never throws: it runs after the expense is written,
- * and the next write retries a failure.
+ * Zero-based position and FORMULA-rendered value of a tab's exchange rate: the cell right of
+ * the rate label that holds a number or a formula. An expense may be titled like the label,
+ * but its neighbour is text.
  */
-async function freezeRate(
+function findRateCell(
+  grid: unknown[][],
+): { row: number; col: number; value: number | string } | null {
+  for (const [row, cells] of grid.entries()) {
+    for (const [index, cell] of cells.entries()) {
+      const value = cells[index + 1];
+      const isRate =
+        typeof value === 'number' || (typeof value === 'string' && value.startsWith('='));
+      if (typeof cell === 'string' && cell.trim() === RATE_LABEL && isRate) {
+        return { row, col: index + 1, value };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Replaces the live exchange-rate formula of the months before `date` with its current
+ * value, so a closed month's totals stop moving with the market. Never throws: it runs
+ * after the expense is written. A month it could not fix is reported, and the next write
+ * tries again.
+ */
+async function freezeEarlierRates(
   sheets: sheets_v4.Sheets,
   spreadsheetId: string,
   tabs: Tabs,
-  tab: string,
+  date: Date,
   log: Logger,
-): Promise<WrittenRow['frozenRate']> {
-  const sheetId = tabs.get(tab)?.sheetId;
-  if (sheetId == null || frozenTabs.has(tab)) return undefined;
-  try {
-    const res = await sheets.spreadsheets.get({
-      spreadsheetId,
-      ranges: [`'${tab}'!A1:Z`],
-      fields: 'sheets.data.rowData.values(userEnteredValue,effectiveValue)',
-    });
-    const rows = res.data.sheets?.[0]?.data?.[0]?.rowData ?? [];
-    for (const [rowIndex, row] of rows.entries()) {
-      const cells = row.values ?? [];
-      const label = cells.findIndex((c) => c.userEnteredValue?.stringValue?.trim() === RATE_LABEL);
-      if (label === -1) continue;
+): Promise<FrozenRate[]> {
+  const earlier = Array.from({ length: FREEZE_LOOKBACK_MONTHS }, (_, i) =>
+    monthTabName(date, i + 1),
+  ).filter((tab) => tabs.has(tab));
+  if (earlier.length === 0) return [];
 
-      const cell = cells[label + 1];
-      if (cell?.userEnteredValue?.formulaValue == null) {
-        frozenTabs.add(tab);
-        return undefined;
-      }
-      const rate = cell.effectiveValue?.numberValue;
+  let grids: unknown[][][];
+  try {
+    const res = await sheets.spreadsheets.values.batchGet({
+      spreadsheetId,
+      ranges: earlier.map((tab) => `'${tab}'!A1:Z`),
+      valueRenderOption: 'FORMULA',
+    });
+    // The API returns the ranges in the order they were requested.
+    grids = earlier.map((_, i) => res.data.valueRanges?.[i]?.values ?? []);
+  } catch (err) {
+    log.warn({ err }, '⚠️ Could not read earlier months to freeze their exchange rate');
+    return [];
+  }
+
+  const frozen: FrozenRate[] = [];
+  for (const [i, tab] of earlier.entries()) {
+    try {
+      const cell = findRateCell(grids[i]);
+      if (!cell) throw new Error(`"${tab}" no tiene la celda "${RATE_LABEL}"`);
+      if (typeof cell.value === 'number') continue;
+
+      const res = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `'${tab}'!${String.fromCharCode(65 + cell.col)}${cell.row + 1}`,
+        valueRenderOption: 'UNFORMATTED_VALUE',
+      });
+      const rate = res.data.values?.[0]?.[0];
       // GOOGLEFINANCE yields an error value while it has no quote.
       if (typeof rate !== 'number' || !(rate > 0)) {
         throw new Error(`El cambio de "${tab}" no es un número`);
@@ -319,11 +359,11 @@ async function freezeRate(
             {
               updateCells: {
                 range: {
-                  sheetId,
-                  startRowIndex: rowIndex,
-                  endRowIndex: rowIndex + 1,
-                  startColumnIndex: label + 1,
-                  endColumnIndex: label + 2,
+                  sheetId: tabs.get(tab)?.sheetId,
+                  startRowIndex: cell.row,
+                  endRowIndex: cell.row + 1,
+                  startColumnIndex: cell.col,
+                  endColumnIndex: cell.col + 1,
                 },
                 rows: [{ values: [{ userEnteredValue: { numberValue: rate } }] }],
                 fields: 'userEnteredValue',
@@ -332,15 +372,14 @@ async function freezeRate(
           ],
         },
       });
-      frozenTabs.add(tab);
       log.info({ tab, rate }, '🔒 Froze the exchange rate of a closed month');
-      return { tab, rate };
+      frozen.push({ tab, rate });
+    } catch (err) {
+      log.warn({ err, tab }, '⚠️ Could not freeze the exchange rate');
+      frozen.push({ tab, rate: null });
     }
-    throw new Error(`"${tab}" no tiene la celda "${RATE_LABEL}"`);
-  } catch (err) {
-    log.warn({ err, tab }, '⚠️ Could not freeze the exchange rate');
-    return { tab, rate: null };
   }
+  return frozen;
 }
 
 let writeQueue: Promise<unknown> = Promise.resolve();
@@ -354,7 +393,7 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
 
 /**
  * Appends the expense to its month's tab, creating the tab from the template on the
- * month's first expense, then fixes the previous month's exchange rate if it is still live.
+ * month's first expense, then fixes the exchange rate of earlier months that is still live.
  */
 export function writeExpenseRow(expense: ExpenseRow, instanceLogger?: Logger): Promise<WrittenRow> {
   const log = instanceLogger || logger;
@@ -399,13 +438,7 @@ export function writeExpenseRow(expense: ExpenseRow, instanceLogger?: Logger): P
       throw err;
     }
 
-    const frozenRate = await freezeRate(
-      sheets,
-      spreadsheetId,
-      tabs,
-      monthTabName(expense.date, 1),
-      log,
-    );
-    return { tab, row, ...(frozenRate && { frozenRate }) };
+    const frozenRates = await freezeEarlierRates(sheets, spreadsheetId, tabs, expense.date, log);
+    return { tab, row, ...(frozenRates.length > 0 && { frozenRates }) };
   });
 }

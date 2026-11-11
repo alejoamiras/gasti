@@ -11,6 +11,7 @@ import {
 
 const HEADERS = ['Gasto', 'Moneda', 'Monto', 'ARS', 'Paga', 'Categoría', 'Tipo', 'Comments'];
 const ARS_FORMULA = '=IF(C3="USD";MULTIPLY($D3;$L$18);$D3)';
+const LIVE_RATE = '=GOOGLEFINANCE("CURRENCY:USDARS")';
 
 // Summary beside the expenses: headers on row 2 from column B, no Fecha.
 const sideLayout = (...titles: unknown[]): unknown[][] => [
@@ -27,17 +28,24 @@ const topLayout = (...titles: unknown[]): unknown[][] => [
   ['Fecha', ...HEADERS],
   ...titles.map((title) => ['', title, 'ARS', 100, ARS_FORMULA]),
 ];
-
-type Rate = { entered: string | number; effective?: number };
+/** Puts the rate label at a zero-based position, with the rate in the cell to its right. */
+const withRate = (grid: unknown[][], row: number, col: number, rate: unknown): unknown[][] => {
+  while (grid.length <= row) grid.push([]);
+  while (grid[row].length < col) grid[row].push('');
+  grid[row][col] = 'Cambio Dólares';
+  grid[row][col + 1] = rate;
+  return grid;
+};
 
 // In-memory spreadsheet; the factory only reads it inside functions called after setup.
 const mockSheet = {
   tabs: [] as string[],
-  /** Cells of the tab being written, as the FORMULA rendering returns them. */
-  grid: [] as unknown[][],
-  /** Exchange-rate cell (L18, labelled in K18) of other tabs. */
-  rates: new Map<string, Rate>(),
-  rateReads: 0,
+  /** Cells of each tab, as the FORMULA rendering returns them. */
+  grids: new Map<string, unknown[][]>(),
+  /** What a formula cell currently computes to, by A1 range; any other cell reads as an error. */
+  computed: new Map<string, number>(),
+  /** Requests the API refuses, failing their whole batch. */
+  rejects: (request: sheets_v4.Schema$Request): boolean => mockEntered(request) === 'boom',
   duplicatedFrom: [] as number[],
   writtenTo: [] as number[],
   ids: new Map<string, number>(),
@@ -47,51 +55,46 @@ const mockSheetId = (title: string) => {
   if (!mockSheet.ids.has(title)) mockSheet.ids.set(title, 100 + mockSheet.ids.size);
   return mockSheet.ids.get(title) as number;
 };
+const mockTabOf = (range: string) => range.split("'")[1];
+const mockCopyOf = (tab: string) => (mockSheet.grids.get(tab) ?? []).map((cells) => [...cells]);
+function mockEntered(request: sheets_v4.Schema$Request) {
+  const value = request.updateCells?.rows?.[0].values?.[0].userEnteredValue;
+  return value?.stringValue ?? value?.numberValue;
+}
 
 jest.mock('googleapis', () => ({
   google: {
     auth: { GoogleAuth: jest.fn() },
     sheets: () => ({
       spreadsheets: {
-        get: async ({ ranges }: { ranges?: string[] }) => {
-          if (!ranges) {
-            return {
-              data: {
-                sheets: mockSheet.tabs.map((title, index) => ({
-                  properties: { title, index, sheetId: mockSheetId(title) },
-                })),
-              },
-            };
-          }
-          mockSheet.rateReads += 1;
-          const rate = mockSheet.rates.get(ranges[0].split("'")[1]) as Rate;
-          const cell: sheets_v4.Schema$CellData =
-            typeof rate.entered === 'number'
-              ? { userEnteredValue: { numberValue: rate.entered } }
-              : {
-                  userEnteredValue: { formulaValue: rate.entered },
-                  effectiveValue:
-                    rate.effective === undefined
-                      ? { errorValue: { type: 'N_A' } }
-                      : { numberValue: rate.effective },
-                };
-          const rowData: sheets_v4.Schema$RowData[] = Array.from({ length: 17 }, () => ({}));
-          rowData.push({
-            values: [
-              ...Array.from({ length: 10 }, () => ({})),
-              { userEnteredValue: { stringValue: 'Cambio Dólares' } },
-              cell,
-            ],
-          });
-          return { data: { sheets: [{ data: [{ rowData }] }] } };
-        },
+        get: async () => ({
+          data: {
+            sheets: mockSheet.tabs.map((title, index) => ({
+              properties: { title, index, sheetId: mockSheetId(title) },
+            })),
+          },
+        }),
         values: {
-          get: async () => {
-            const values = mockSheet.grid.map((cells) => [...cells]);
+          get: async ({
+            range,
+            valueRenderOption,
+          }: {
+            range: string;
+            valueRenderOption: string;
+          }) => {
+            if (valueRenderOption === 'UNFORMATTED_VALUE') {
+              return { data: { values: [[mockSheet.computed.get(range) ?? '#N/A']] } };
+            }
+            const values = mockCopyOf(mockTabOf(range));
             // Yield so that unserialized writes would interleave and pick the same row.
             await new Promise((resolve) => setTimeout(resolve, 5));
             return { data: { values } };
           },
+          batchGet: async ({ ranges }: { ranges: string[] }) => ({
+            data: {
+              valueRanges: ranges.map((range) => ({ values: mockCopyOf(mockTabOf(range)) })),
+            },
+          }),
         },
         batchUpdate: async ({
           requestBody,
@@ -101,34 +104,29 @@ jest.mock('googleapis', () => ({
           const requests = requestBody.requests ?? [];
           const duplicate = requests[0].duplicateSheet;
           if (duplicate) {
+            const name = duplicate.newSheetName ?? '';
             mockSheet.duplicatedFrom.push(duplicate.sourceSheetId ?? -1);
-            mockSheet.tabs.splice(duplicate.insertSheetIndex ?? 0, 0, duplicate.newSheetName ?? '');
-            const sheetId = mockSheetId(duplicate.newSheetName ?? '');
+            mockSheet.tabs.splice(duplicate.insertSheetIndex ?? 0, 0, name);
+            mockSheet.grids.set(name, mockCopyOf('template'));
+            const sheetId = mockSheetId(name);
             return { data: { replies: [{ duplicateSheet: { properties: { sheetId } } }] } };
           }
-          const value = (request: sheets_v4.Schema$Request) =>
-            request.updateCells?.rows?.[0].values?.[0].userEnteredValue;
+          // Atomic like the real call: a rejected request leaves the tab untouched.
+          if (requests.some(mockSheet.rejects)) throw new Error('rejected');
+
           const sheetId = requests[0].updateCells?.range?.sheetId ?? -1;
-
-          const rateTab = [...mockSheet.rates.keys()].find((tab) => mockSheetId(tab) === sheetId);
-          if (rateTab) {
-            const { startRowIndex, startColumnIndex } = requests[0].updateCells?.range ?? {};
-            expect([startRowIndex, startColumnIndex]).toEqual([17, 11]);
-            mockSheet.rates.set(rateTab, { entered: value(requests[0])?.numberValue as number });
-            return { data: {} };
-          }
-
-          // Atomic like the real call: a rejected request leaves the grid untouched.
-          if (requests.some((r) => value(r)?.stringValue === 'boom')) throw new Error('rejected');
+          const tab = mockSheet.tabs.find((title) => mockSheetId(title) === sheetId) ?? '';
+          const grid = mockSheet.grids.get(tab) as unknown[][];
           for (const request of requests) {
-            const range = (request.updateCells?.range ?? request.copyPaste?.destination) as {
+            const source = request.copyPaste?.source;
+            const target = (request.updateCells?.range ?? request.copyPaste?.destination) as {
               startRowIndex: number;
               startColumnIndex: number;
             };
-            const cells = (mockSheet.grid[range.startRowIndex] ??= []);
-            cells[range.startColumnIndex] = request.copyPaste
-              ? ARS_FORMULA
-              : (value(request)?.stringValue ?? value(request)?.numberValue);
+            const cells = (grid[target.startRowIndex] ??= []);
+            cells[target.startColumnIndex] = source
+              ? grid[source.startRowIndex ?? -1]?.[source.startColumnIndex ?? -1]
+              : mockEntered(request);
           }
           mockSheet.writtenTo.push(sheetId);
           return { data: {} };
@@ -147,8 +145,7 @@ const expense = (title: string, date = NOVEMBER) => ({
   description: '',
   date,
 });
-const titlesOf = (grid: unknown[][], column: number, fromRow: number) =>
-  grid.slice(fromRow - 1).map((cells) => cells[column]);
+const gridOf = (tab: string) => mockSheet.grids.get(tab) as unknown[][];
 
 describe('monthTabName', () => {
   it('names the tab in Argentina time, with the year', () => {
@@ -265,9 +262,9 @@ describe('writeExpenseRow', () => {
     process.env.GOOGLE_SHEETS_SPREADSHEET_ID = 'sheet';
     Object.assign(mockSheet, {
       tabs: ['noviembre 26'],
-      grid: sideLayout('Expensas'),
-      rates: new Map(),
-      rateReads: 0,
+      grids: new Map([['noviembre 26', sideLayout('Expensas')]]),
+      computed: new Map(),
+      rejects: (request: sheets_v4.Schema$Request) => mockEntered(request) === 'boom',
       duplicatedFrom: [],
       writtenTo: [],
       ids: new Map(),
@@ -286,14 +283,20 @@ describe('writeExpenseRow', () => {
       'failed',
       5,
     ]);
-    expect(titlesOf(mockSheet.grid, 1, 3)).toEqual(['Expensas', 'A', 'C']);
+    expect(gridOf('noviembre 26').map((cells) => cells[1])).toEqual([
+      undefined,
+      'Gasto',
+      'Expensas',
+      'A',
+      'C',
+    ]);
   });
 
   it('writes under the headers of a tab laid out differently, dating the row', async () => {
-    mockSheet.grid = topLayout('Expensas');
+    mockSheet.grids.set('noviembre 26', topLayout('Expensas'));
 
     await expect(writeExpenseRow(expense('A'))).resolves.toEqual({ tab: 'noviembre 26', row: 7 });
-    expect(mockSheet.grid[6]).toEqual([
+    expect(gridOf('noviembre 26')[6]).toEqual([
       46337,
       'A',
       'ARS',
@@ -307,7 +310,8 @@ describe('writeExpenseRow', () => {
   });
 
   it("creates the month's tab once from the template, just before it, and writes there", async () => {
-    mockSheet.tabs = ['septiembre 26', 'template', 'mari'];
+    mockSheet.tabs = ['enero 24', 'template', 'mari'];
+    mockSheet.grids.set('template', sideLayout('Expensas'));
     const templateId = mockSheetId('template');
 
     const rows = await Promise.all([writeExpenseRow(expense('A')), writeExpenseRow(expense('B'))]);
@@ -316,7 +320,7 @@ describe('writeExpenseRow', () => {
       { tab: 'noviembre 26', row: 4 },
       { tab: 'noviembre 26', row: 5 },
     ]);
-    expect(mockSheet.tabs).toEqual(['septiembre 26', 'noviembre 26', 'template', 'mari']);
+    expect(mockSheet.tabs).toEqual(['enero 24', 'noviembre 26', 'template', 'mari']);
     const monthId = mockSheetId('noviembre 26');
     expect(mockSheet.duplicatedFrom).toEqual([templateId]);
     expect(mockSheet.writtenTo).toEqual([monthId, monthId]);
@@ -328,65 +332,74 @@ describe('writeExpenseRow', () => {
     await expect(writeExpenseRow(expense('A'))).rejects.toThrow('ni la plantilla');
 
     mockSheet.tabs = ['noviembre 26'];
-    mockSheet.grid = [[], ['', 'Gasto', 'Monto']];
+    mockSheet.grids.set('noviembre 26', [[], ['', 'Gasto', 'Monto']]);
     await expect(writeExpenseRow(expense('A'))).rejects.toThrow('fila de encabezados');
 
-    mockSheet.grid = sideLayout();
+    mockSheet.grids.set('noviembre 26', sideLayout());
     await expect(writeExpenseRow(expense('A'))).rejects.toThrow('fórmula de ARS');
 
     expect(mockSheet.writtenTo).toEqual([]);
   });
 
-  // Each case uses its own month: the module remembers which tabs it has already fixed.
-  describe('exchange rate of the previous month', () => {
-    const live = '=GOOGLEFINANCE("CURRENCY:USDARS")';
-
-    it('is fixed at its current value once, and reported', async () => {
+  describe('exchange rate of earlier months', () => {
+    it('is fixed at its current value in every month still live, wherever the cell is', async () => {
       const december = new Date('2026-12-01T09:00:00-03:00');
-      mockSheet.tabs = ['noviembre 26', 'diciembre 26'];
-      mockSheet.rates.set('noviembre 26', { entered: live, effective: 1550.25 });
+      mockSheet.tabs = ['octubre 26', 'noviembre 26', 'diciembre 26'];
+      // October has an expense titled like the label above its real rate cell (L18).
+      mockSheet.grids.set('octubre 26', withRate(sideLayout('Cambio Dólares'), 17, 10, LIVE_RATE));
+      mockSheet.grids.set('noviembre 26', withRate(topLayout('Expensas'), 3, 0, LIVE_RATE));
+      mockSheet.grids.set('diciembre 26', sideLayout('Expensas'));
+      mockSheet.computed.set("'octubre 26'!L18", 1500).set("'noviembre 26'!B4", 1550.25);
 
       await expect(writeExpenseRow(expense('A', december))).resolves.toEqual({
         tab: 'diciembre 26',
         row: 4,
-        frozenRate: { tab: 'noviembre 26', rate: 1550.25 },
+        frozenRates: [
+          { tab: 'noviembre 26', rate: 1550.25 },
+          { tab: 'octubre 26', rate: 1500 },
+        ],
       });
-      expect(mockSheet.rates.get('noviembre 26')).toEqual({ entered: 1550.25 });
+      expect(gridOf('octubre 26')[17][11]).toBe(1500);
+      expect(gridOf('noviembre 26')[3][1]).toBe(1550.25);
+      expect(gridOf('octubre 26')[2][2]).toBe('ARS');
 
+      // Now that both are plain numbers, the next write leaves them alone.
       await expect(writeExpenseRow(expense('B', december))).resolves.toEqual({
         tab: 'diciembre 26',
         row: 5,
       });
-      expect(mockSheet.rateReads).toBe(1);
+      expect(mockSheet.writtenTo.filter((id) => id !== mockSheetId('diciembre 26'))).toHaveLength(
+        2,
+      );
     });
 
-    it('stays live while it has no value, without failing the expense, and is retried', async () => {
+    it('stays live, without failing the expense, until it can be read and written', async () => {
       const january = new Date('2027-01-02T09:00:00-03:00');
       mockSheet.tabs = ['diciembre 26', 'enero 27'];
-      mockSheet.rates.set('diciembre 26', { entered: live });
+      mockSheet.grids.set('diciembre 26', withRate(sideLayout('Expensas'), 17, 10, LIVE_RATE));
+      mockSheet.grids.set('enero 27', sideLayout('Expensas'));
+      const unfixed = { frozenRates: [{ tab: 'diciembre 26', rate: null }] };
 
+      // No quote yet: the formula computes to an error.
       await expect(writeExpenseRow(expense('A', january))).resolves.toEqual({
         tab: 'enero 27',
         row: 4,
-        frozenRate: { tab: 'diciembre 26', rate: null },
+        ...unfixed,
       });
-      expect(mockSheet.rates.get('diciembre 26')).toEqual({ entered: live });
 
-      mockSheet.rates.set('diciembre 26', { entered: live, effective: 1600 });
-      const retried = await writeExpenseRow(expense('B', january));
-      expect(retried.frozenRate).toEqual({ tab: 'diciembre 26', rate: 1600 });
-    });
-
-    it('is left alone when it is already a fixed number', async () => {
-      const february = new Date('2027-02-02T09:00:00-03:00');
-      mockSheet.tabs = ['enero 27', 'febrero 27'];
-      mockSheet.rates.set('enero 27', { entered: 1700 });
-
-      await expect(writeExpenseRow(expense('A', february))).resolves.toEqual({
-        tab: 'febrero 27',
-        row: 4,
+      // A quote, but the API refuses to store it.
+      mockSheet.computed.set("'diciembre 26'!L18", 1600);
+      mockSheet.rejects = (request) => mockEntered(request) === 1600;
+      await expect(writeExpenseRow(expense('B', january))).resolves.toEqual({
+        tab: 'enero 27',
+        row: 5,
+        ...unfixed,
       });
-      expect(mockSheet.rates.get('enero 27')).toEqual({ entered: 1700 });
+      expect(gridOf('diciembre 26')[17][11]).toBe(LIVE_RATE);
+
+      mockSheet.rejects = () => false;
+      const retried = await writeExpenseRow(expense('C', january));
+      expect(retried.frozenRates).toEqual([{ tab: 'diciembre 26', rate: 1600 }]);
     });
   });
 });
