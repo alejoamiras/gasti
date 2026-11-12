@@ -106,7 +106,11 @@ This script includes memory optimizations:
 
 ## Spreadsheet layout
 
-The bot writes to the tab named after the current month in Argentina time plus the two-digit year, e.g. `octubre 26`. If that tab doesn't exist yet, it duplicates `template` into it, placed just before `template`. Rows start at row 3, with columns B `Gasto`, C `Moneda`, D `Monto`, E `ARS` (copied from E3's formula), F `Paga`, G `Categoría`, H `Tipo` (always `variable`) and I `Comments`.
+The bot writes to the tab named after the month the message was sent in, in Argentina time, plus the two-digit year, e.g. `octubre 26`. If that tab doesn't exist yet, it duplicates `template` into it, placed just before `template`.
+
+It finds the expense table by its header row (`Gasto`, `Moneda`, `Monto`, `ARS`, `Paga`, `Categoría`, `Tipo` and `Comments`, in any order) and fills the first row under it whose `Gasto` cell is empty, so the summary can sit beside the table or above it. The table must be within columns A:Z, and no other cell on the header row may repeat one of those names. `ARS` is copied from the first expense row's formula and `Tipo` is always `variable`. If the header row also has a `Fecha` column, it gets the day the message was sent, as a date shown as dd/mm.
+
+The cell to the right of `Cambio Dólares` is the tab's USD→ARS rate (the same text inside an expense row doesn't count). Every time an expense is written, the bot looks at the tabs of the twelve months before it and replaces any rate that is still a formula with its current value, so a closed month's totals stop moving with the market. The confirmation message says which months were fixed, or could not be.
 
 ## Deployment (Railway)
 

@@ -31,7 +31,8 @@ const mockLogger = {
   warn: jest.Mock;
 };
 
-const userInfo = { chatId: 123, userId: 111, payer: 'alejo', messageText: 'super 1500' };
+const sentAt = new Date('2026-10-31T23:30:00-03:00');
+const userInfo = { chatId: 123, userId: 111, payer: 'alejo', messageText: 'super 1500', sentAt };
 
 describe('Bot Helpers', () => {
   beforeEach(() => {
@@ -58,12 +59,15 @@ describe('Bot Helpers', () => {
   describe('authorize', () => {
     const allowed = parseAllowedUsers('111:alejo,@morafreaza:mora');
 
-    it('accepts allowlisted ids and usernames, taking the caption or the text', () => {
-      const photo = { chat: { id: 123 }, from: { id: 111 }, caption: 'Café' } as Message;
+    it('accepts allowlisted ids and usernames, taking the caption or the text and the send time', () => {
+      // Telegram dates messages in seconds.
+      const date = sentAt.getTime() / 1000;
+      const photo = { chat: { id: 123 }, from: { id: 111 }, caption: 'Café', date } as Message;
       const text = {
         chat: { id: 123 },
         from: { id: 222, username: 'MoraFreaza' },
         text: 'Café 2800',
+        date,
       } as unknown as Message;
 
       expect(authorize(photo, allowed)).toEqual({ ...userInfo, messageText: 'Café' });
@@ -116,6 +120,7 @@ describe('Bot Helpers', () => {
           payer: 'alejo',
           category: '🛒',
           description: 'Compras del super',
+          date: sentAt,
         },
         mockLogger,
       );
@@ -123,6 +128,29 @@ describe('Bot Helpers', () => {
         123,
         '✅ Gasto agregado: Supermercado · $15.300,5 · 🛒 (octubre 26, fila 13)',
       );
+    });
+
+    it('reports each earlier exchange rate the write fixed, or failed to', async () => {
+      jest.mocked(writeExpenseRow).mockResolvedValueOnce({
+        tab: 'diciembre 26',
+        row: 3,
+        frozenRates: [
+          { tab: 'noviembre 26', rate: 1550.25 },
+          { tab: 'octubre 26', rate: null },
+        ],
+      });
+
+      await processExpense(
+        { title: 'Café', amount: 2800, category: '🍾', description: 'Café' },
+        userInfo,
+        mockBot as never,
+        mockLogger as never,
+      );
+
+      expect((mockBot.sendMessage.mock.calls[0][1] as string).split('\n').slice(1)).toEqual([
+        '🔒 Cambio de noviembre 26 fijado en $1.550,25',
+        '⚠️ No pude fijar el cambio de octubre 26; reintento con el próximo gasto',
+      ]);
     });
 
     it('does not report a failed confirmation as a failed write', async () => {
